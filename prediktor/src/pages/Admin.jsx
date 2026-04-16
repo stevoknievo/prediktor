@@ -8,7 +8,6 @@ import {
 import { db } from '../lib/firebase'
 import { collection as col, getDocs as gd } from 'firebase/firestore'
 import { scoreMatch, scoreTournamentBonuses, scorePlayerStats } from '../lib/scoring'
-import { updatePlayerTotalPoints, savePlayerMatchScore } from '../lib/db'
 
 const ADMIN_PASS = import.meta.env.VITE_ADMIN_PASS || 'prediktor2026'
 
