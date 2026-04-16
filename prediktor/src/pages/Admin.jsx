@@ -2,8 +2,8 @@
 import { useState, useEffect } from 'react'
 import { fetchFixtures, fetchFixtureEvents } from '../lib/footballApi'
 import {
-  saveFixtures, getFixtures, saveConfig, getTournamentOutcomes,
-  saveTournamentOutcomes, getDocs, collection
+  saveFixtures, saveConfig, getTournamentOutcomes, saveTournamentOutcomes,
+  savePlayerMatchScore, updatePlayerTotalPoints
 } from '../lib/db'
 import { db } from '../lib/firebase'
 import { collection as col, getDocs as gd } from 'firebase/firestore'
