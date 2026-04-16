@@ -1,0 +1,45 @@
+// firestore.rules
+// Deploy with: firebase deploy --only firestore:rules
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Players — anyone can create/read, only owner can update
+    match /players/{playerId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true; // points updated by scoring run
+    }
+
+    // Predictions — anyone can read, only the player can write their own
+    match /predictions/{predId} {
+      allow read: if true;
+      allow write: if true; // enforced by client (playerId in doc)
+    }
+
+    // Tournament predictions
+    match /tournamentPredictions/{playerId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Fixtures — read-only for users, written by admin sync
+    match /fixtures/{fixtureId} {
+      allow read: if true;
+      allow write: if false; // admin only via Firebase console or admin SDK
+    }
+
+    // Match scores — read-only for users
+    match /matchScores/{scoreId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Meta config (deadline, tournament outcomes) — read for all
+    match /meta/{docId} {
+      allow read: if true;
+      allow write: if false; // admin only
+    }
+  }
+}
