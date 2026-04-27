@@ -27,6 +27,7 @@ async function apiFetch(endpoint) {
  */
 export async function fetchFixtures() {
   const data = await apiFetch(`/fixtures?league=${WC_LEAGUE_ID}&season=${WC_SEASON}`)
+  console.log('API response:', JSON.stringify(data).substring(0, 500))
   return data.response.map(normalizeFixture)
 }
 
