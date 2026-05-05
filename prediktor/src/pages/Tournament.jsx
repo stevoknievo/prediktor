@@ -3,12 +3,16 @@ import { useState, useEffect } from 'react'
 import { saveTournamentPrediction, getTournamentPrediction } from '../lib/db'
 
 const WC2026_TEAMS = [
-  'Argentina','Australia','Belgium','Brazil','Cameroon','Canada','Chile','Colombia',
-  'Costa Rica','Croatia','Denmark','Ecuador','Egypt','England','France','Germany',
-  'Ghana','Greece','Honduras','Iran','Italy','Japan','Mexico','Morocco',
-  'Netherlands','New Zealand','Nigeria','Panama','Paraguay','Peru','Poland',
-  'Portugal','Qatar','Romania','Saudi Arabia','Senegal','Serbia','South Korea',
-  'Spain','Switzerland','Tunisia','Turkey','Ukraine','Uruguay','USA','Venezuela','Wales'
+  'Algeria','Argentina','Australia','Austria','Belgium',
+  'Bosnia & Herzegovina','Brazil','Canada','Cape Verde',
+  'Colombia','Croatia','Curaçao','Czech Republic','DR Congo',
+  'Ecuador','Egypt','England','France','Germany','Ghana',
+  'Haiti','Iran','Iraq','Ivory Coast','Japan','Jordan',
+  'Mexico','Morocco','Netherlands','New Zealand','Norway',
+  'Panama','Paraguay','Portugal','Qatar','Saudi Arabia',
+  'Senegal','Scotland','South Africa','South Korea','Spain',
+  'Sweden','Switzerland','Tunisia','Türkiye','Uruguay',
+  'USA','Uzbekistan'
 ].sort()
 
 function NamedPlayerInput({ label, hint, names, onChange }) {
