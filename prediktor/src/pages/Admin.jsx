@@ -1,15 +1,72 @@
 // src/pages/Admin.jsx
 import { useState, useEffect } from 'react'
-import { fetchFixtures, fetchFixtureEvents } from '../lib/footballApi'
+import { getFunctions, httpsCallable } from 'firebase/functions'
 import {
-  saveFixtures, saveConfig, getTournamentOutcomes, saveTournamentOutcomes,
+  saveConfig, getTournamentOutcomes, saveTournamentOutcomes,
   savePlayerMatchScore, updatePlayerTotalPoints
 } from '../lib/db'
 import { db } from '../lib/firebase'
-import { collection as col, getDocs as gd } from 'firebase/firestore'
-import { scoreMatch, scoreTournamentBonuses, scorePlayerStats } from '../lib/scoring'
+import { collection, getDocs, deleteDoc, doc } from 'firebase/firestore'
+import { scoreMatch, scoreTournamentBonuses } from '../lib/scoring'
 
 const ADMIN_PASS = import.meta.env.VITE_ADMIN_PASS || 'prediktor2026'
+
+function PlayerManager({ addLog }) {
+  const [players, setPlayers] = useState([])
+  const [loading, setLoading] = useState(false)
+
+  async function loadPlayers() {
+    setLoading(true)
+    const snap = await getDocs(collection(db, 'players'))
+    setPlayers(snap.docs.map(d => d.data()).sort((a, b) => b.totalPoints - a.totalPoints))
+    setLoading(false)
+  }
+
+  async function deletePlayer(player) {
+    if (!confirm(`Delete ${player.nickname}? This cannot be undone.`)) return
+    try {
+      await deleteDoc(doc(db, 'players', player.id))
+      setPlayers(prev => prev.filter(p => p.id !== player.id))
+      addLog(`✓ Deleted player: ${player.nickname}`, 'success')
+    } catch (err) {
+      addLog(`✗ Error deleting player: ${err.message}`, 'error')
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <h3>👥 PLAYERS</h3>
+        <button className="btn btn-ghost" style={{ fontSize: '0.85rem', padding: '0.35rem 0.9rem' }} onClick={loadPlayers} disabled={loading}>
+          {loading ? 'Loading...' : 'Load Players'}
+        </button>
+      </div>
+
+      {players.length === 0 && (
+        <p style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>Click "Load Players" to see all participants.</p>
+      )}
+
+      {players.map(player => (
+        <div key={player.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>
+          <div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: '1rem' }}>{player.nickname}</div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{player.id}</div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', color: 'var(--gold)' }}>{player.totalPoints} pts</div>
+            <button
+              className="btn btn-danger"
+              style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem' }}
+              onClick={() => deletePlayer(player)}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 export default function Admin() {
   const [authed, setAuthed] = useState(false)
@@ -37,11 +94,16 @@ export default function Admin() {
 
   async function syncFixtures() {
     setLoading(true)
-    addLog('Fetching fixtures from API-Football...')
+    addLog('Calling sync function...')
     try {
-      const fixtures = await fetchFixtures()
-      await saveFixtures(fixtures)
-      addLog(`✓ Synced ${fixtures.length} fixtures`, 'success')
+      const functions = getFunctions()
+      const syncFn = httpsCallable(functions, 'syncFixtures')
+      const result = await syncFn()
+      if (result.data.success) {
+        addLog(`✓ Synced ${result.data.count} fixtures`, 'success')
+      } else {
+        addLog(`✗ ${result.data.message}`, 'error')
+      }
     } catch (err) {
       addLog(`✗ Error: ${err.message}`, 'error')
     }
@@ -52,12 +114,11 @@ export default function Admin() {
     setLoading(true)
     addLog('Starting scoring run...')
     try {
-      // Get all fixtures, predictions, tournament predictions, players
       const [fixturesSnap, predsSnap, tournSnap, playersSnap] = await Promise.all([
-        gd(col(db, 'fixtures')),
-        gd(col(db, 'predictions')),
-        gd(col(db, 'tournamentPredictions')),
-        gd(col(db, 'players'))
+        getDocs(collection(db, 'fixtures')),
+        getDocs(collection(db, 'predictions')),
+        getDocs(collection(db, 'tournamentPredictions')),
+        getDocs(collection(db, 'players'))
       ])
 
       const fixtures = fixturesSnap.docs.map(d => d.data())
@@ -73,7 +134,6 @@ export default function Admin() {
         const playerPreds = predictions.filter(p => p.playerId === player.id)
         const tournPred = tournPreds.find(p => p.playerId === player.id)
 
-        // Match predictions
         for (const pred of playerPreds) {
           const fixture = fixtures.find(f => f.id === pred.fixtureId)
           if (!fixture?.completed) continue
@@ -84,9 +144,8 @@ export default function Admin() {
           }
         }
 
-        // Tournament bonuses
         if (tournPred && tournamentOutcomes) {
-          const { points, breakdown } = scoreTournamentBonuses(tournPred, tournamentOutcomes)
+          const { points } = scoreTournamentBonuses(tournPred, tournamentOutcomes)
           total += points
           if (points > 0) addLog(`  ${player.nickname}: +${points} tournament bonus`)
         }
@@ -142,7 +201,8 @@ export default function Admin() {
     <div className="page">
       <h2 style={{ marginBottom: '1.5rem' }}>ADMIN PANEL</h2>
 
-      {/* Deadline */}
+      <PlayerManager addLog={addLog} />
+
       <div className="card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ marginBottom: '1rem' }}>📅 PREDICTION DEADLINE</h3>
         <input
@@ -154,25 +214,22 @@ export default function Admin() {
         <button className="btn btn-primary" onClick={saveDeadline}>Set Deadline</button>
       </div>
 
-      {/* Sync fixtures */}
       <div className="card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ marginBottom: '0.5rem' }}>🔄 SYNC FIXTURES</h3>
-        <p style={{ fontSize: '0.82rem', marginBottom: '1rem' }}>Fetches all WC 2026 fixtures + results from API-Football.</p>
+        <p style={{ fontSize: '0.82rem', marginBottom: '1rem' }}>Fetches all WC 2026 results from API-Football via Cloud Function.</p>
         <button className="btn btn-primary" onClick={syncFixtures} disabled={loading}>
           {loading ? 'Working...' : 'Sync from API'}
         </button>
       </div>
 
-      {/* Tournament outcomes */}
       <div className="card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ marginBottom: '1rem' }}>🏆 TOURNAMENT OUTCOMES</h3>
         <p style={{ fontSize: '0.82rem', marginBottom: '1rem' }}>Fill these in as the tournament progresses to unlock bonus scoring.</p>
-
         {[
           { key: 'winner', label: 'Tournament Winner' },
-          { key: 'topScorer', label: 'Golden Boot (name or names comma-separated if joint)' },
-          { key: 'topAssister', label: 'Most Assists (name or names comma-separated)' },
-          { key: 'topCleanSheet', label: 'Most Clean Sheets GK (name or names comma-separated)' },
+          { key: 'topScorer', label: 'Golden Boot (comma-separated if joint)' },
+          { key: 'topAssister', label: 'Most Assists (comma-separated if joint)' },
+          { key: 'topCleanSheet', label: 'Most Clean Sheets GK (comma-separated if joint)' },
           { key: 'totalRedCards', label: 'Total Red Cards' },
           { key: 'mostRedCardTeam', label: 'Team with Most Red Cards' },
           { key: 'totalYellowCards', label: 'Total Yellow Cards' },
@@ -191,7 +248,6 @@ export default function Admin() {
         <button className="btn btn-primary" style={{ marginTop: '0.5rem' }} onClick={saveOutcomes}>Save Outcomes</button>
       </div>
 
-      {/* Run scoring */}
       <div className="card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ marginBottom: '0.5rem' }}>⚡ RUN SCORING</h3>
         <p style={{ fontSize: '0.82rem', marginBottom: '1rem' }}>Recalculates all player points based on completed fixtures and saved outcomes.</p>
@@ -200,7 +256,6 @@ export default function Admin() {
         </button>
       </div>
 
-      {/* Log */}
       {log.length > 0 && (
         <div className="card" style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
