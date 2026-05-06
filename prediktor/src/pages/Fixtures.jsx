@@ -1,5 +1,5 @@
 // src/pages/Fixtures.jsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { subscribeFixtures, getPlayerPredictions, savePrediction, getDeadline } from '../lib/db'
 
 function formatDate(iso) {
@@ -9,6 +9,8 @@ function formatDate(iso) {
 }
 
 function groupByStage(fixtures) {
+  // Fixed stage order
+  const order = ['Group A','Group B','Group C','Group D','Group E','Group F','Group G','Group H','Group I','Group J','Group K','Group L','Round of 32','Round of 16','Quarter-final','Semi-final','3rd Place Final','Final']
   return fixtures.reduce((acc, f) => {
     const key = f.stage || 'Unknown'
     if (!acc[key]) acc[key] = []
@@ -16,6 +18,8 @@ function groupByStage(fixtures) {
     return acc
   }, {})
 }
+
+const STAGE_ORDER = ['Group A','Group B','Group C','Group D','Group E','Group F','Group G','Group H','Group I','Group J','Group K','Group L','Round of 32','Round of 16','Quarter-final','Semi-final','3rd Place Final','Final']
 
 function ScoreInput({ value, onChange, disabled }) {
   return (
@@ -33,31 +37,50 @@ function ScoreInput({ value, onChange, disabled }) {
 function FixtureRow({ fixture, prediction, onSave, locked }) {
   const [home, setHome] = useState(prediction?.score90Home ?? '')
   const [away, setAway] = useState(prediction?.score90Away ?? '')
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
+  const [status, setStatus] = useState(null) // null | 'saving' | 'saved' | 'error'
+  const saveTimer = useRef(null)
 
   const actual = fixture.completed
   const scoreStr = actual ? `${fixture.score90Home}–${fixture.score90Away}` : null
 
-  async function handleSave() {
-    if (home === '' || away === '') return
-    setSaving(true)
-    await onSave(fixture.id, { score90Home: Number(home), score90Away: Number(away) })
-    setSaving(false)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
+  // Auto-save when both inputs have values
+  useEffect(() => {
+    if (home === '' || away === '' || locked || actual) return
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(async () => {
+      setStatus('saving')
+      try {
+        await onSave(fixture.id, { score90Home: Number(home), score90Away: Number(away) })
+        setStatus('saved')
+        setTimeout(() => setStatus(null), 2000)
+      } catch {
+        setStatus('error')
+      }
+    }, 800) // 800ms debounce after last keystroke
+    return () => clearTimeout(saveTimer.current)
+  }, [home, away])
+
+  // Sync if prediction changes externally
+  useEffect(() => {
+    if (prediction?.score90Home !== undefined) setHome(prediction.score90Home)
+    if (prediction?.score90Away !== undefined) setAway(prediction.score90Away)
+  }, [prediction?.score90Home, prediction?.score90Away])
 
   return (
     <div className="fixture-card">
       <div className="fixture-meta">
         <span>{formatDate(fixture.date)}</span>
-        {actual
-          ? <span className="badge badge-green">FT</span>
-          : locked
-          ? <span className="badge badge-red">LOCKED</span>
-          : <span className="badge badge-cyan">OPEN</span>
-        }
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {status === 'saving' && <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>saving...</span>}
+          {status === 'saved' && <span style={{ fontSize: '0.72rem', color: 'var(--green)' }}>✓ saved</span>}
+          {status === 'error' && <span style={{ fontSize: '0.72rem', color: 'var(--red)' }}>error</span>}
+          {actual
+            ? <span className="badge badge-green">FT</span>
+            : locked
+            ? <span className="badge badge-red">LOCKED</span>
+            : <span className="badge badge-cyan">OPEN</span>
+          }
+        </div>
       </div>
 
       <div className="fixture-teams">
@@ -70,6 +93,8 @@ function FixtureRow({ fixture, prediction, onSave, locked }) {
           <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem', color: 'var(--gold)' }}>
             {scoreStr}
           </div>
+        ) : fixture.homeTeam === 'TBD' ? (
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '1rem', color: 'var(--muted)' }}>TBD</div>
         ) : (
           <div className="score-pair">
             <ScoreInput value={home} onChange={setHome} disabled={locked} />
@@ -84,20 +109,7 @@ function FixtureRow({ fixture, prediction, onSave, locked }) {
         </div>
       </div>
 
-      {!actual && !locked && (
-        <div style={{ marginTop: '0.75rem', display: 'flex', justifyContent: 'flex-end' }}>
-          <button
-            className="btn btn-primary"
-            style={{ fontSize: '0.95rem', padding: '0.45rem 1.25rem' }}
-            onClick={handleSave}
-            disabled={saving || home === '' || away === ''}
-          >
-            {saving ? '...' : saved ? '✓ Saved' : 'Save'}
-          </button>
-        </div>
-      )}
-
-      {prediction && !actual && (
+      {prediction && !actual && !locked && (
         <div style={{ marginTop: '0.5rem', textAlign: 'right', fontSize: '0.78rem', color: 'var(--muted)' }}>
           Your pick: {prediction.score90Home}–{prediction.score90Away}
         </div>
@@ -111,7 +123,7 @@ export default function Fixtures({ playerId }) {
   const [predictions, setPredictions] = useState({})
   const [deadline, setDeadline] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState('all') // 'all' | 'predicted' | 'upcoming'
+  const [filter, setFilter] = useState('all')
 
   useEffect(() => {
     const unsub = subscribeFixtures(setFixtures)
@@ -144,6 +156,13 @@ export default function Fixtures({ playerId }) {
 
   const grouped = groupByStage(fixtures)
 
+  // Sort stages in correct order
+  const sortedStages = Object.keys(grouped).sort((a, b) => {
+    const ai = STAGE_ORDER.indexOf(a)
+    const bi = STAGE_ORDER.indexOf(b)
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
+  })
+
   if (loading) return <div className="page"><div className="spinner" /></div>
 
   return (
@@ -165,7 +184,7 @@ export default function Fixtures({ playerId }) {
         {['all', 'upcoming', 'predicted'].map(f => (
           <button
             key={f}
-            className={`btn btn-ghost ${filter === f ? 'active' : ''}`}
+            className="btn btn-ghost"
             style={{ fontSize: '0.82rem', padding: '0.35rem 0.9rem', ...(filter === f ? { borderColor: 'var(--gold)', color: 'var(--gold)' } : {}) }}
             onClick={() => setFilter(f)}
           >
@@ -180,7 +199,8 @@ export default function Fixtures({ playerId }) {
         </div>
       )}
 
-      {Object.entries(grouped).map(([stage, stageFixtures]) => {
+      {sortedStages.map(stage => {
+        const stageFixtures = grouped[stage]
         const visible = stageFixtures.filter(f => {
           if (filter === 'upcoming') return !f.completed
           if (filter === 'predicted') return predictions[f.id]
