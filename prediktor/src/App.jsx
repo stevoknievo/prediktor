@@ -4,9 +4,9 @@ import Join from './pages/Join'
 import Fixtures from './pages/Fixtures'
 import Tournament from './pages/Tournament'
 import Leaderboard from './pages/Leaderboard'
+import Rivals from './pages/Rivals'
 import Admin from './pages/Admin'
 
-// Tab bar icons
 const Icons = {
   fixtures: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -25,11 +25,20 @@ const Icons = {
       <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
     </svg>
   ),
+  rivals: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+      <circle cx="9" cy="7" r="4"/>
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+      <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+    </svg>
+  ),
 }
 
 const TABS = [
   { id: 'fixtures', label: 'Fixtures', icon: Icons.fixtures },
-  { id: 'tournament', label: 'Tournament', icon: Icons.tournament },
+  { id: 'tournament', label: 'My Picks', icon: Icons.tournament },
+  { id: 'rivals', label: 'Rivals', icon: Icons.rivals },
   { id: 'leaderboard', label: 'Standings', icon: Icons.leaderboard },
 ]
 
@@ -38,22 +47,24 @@ export default function App() {
   const [nickname, setNickname] = useState('')
   const [tab, setTab] = useState('fixtures')
   const [showAdmin, setShowAdmin] = useState(false)
+  const [rivalsPlayerId, setRivalsPlayerId] = useState(null)
 
   useEffect(() => {
     const id = localStorage.getItem('prediktor_player_id')
     const name = localStorage.getItem('prediktor_nickname')
-    if (id && name) {
-      setPlayerId(id)
-      setNickname(name)
-    }
+    if (id && name) { setPlayerId(id); setNickname(name) }
   }, [])
 
-  // Secret admin access: tap logo 5 times
   const [tapCount, setTapCount] = useState(0)
   function handleLogoTap() {
     const next = tapCount + 1
     setTapCount(next)
     if (next >= 5) { setShowAdmin(true); setTapCount(0) }
+  }
+
+  function handleViewRival(rivalId) {
+    setRivalsPlayerId(rivalId)
+    setTab('rivals')
   }
 
   if (!playerId) {
@@ -76,7 +87,6 @@ export default function App() {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* Nav */}
       <nav className="nav">
         <button
           className="nav-logo"
@@ -91,14 +101,13 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Page content */}
       <main style={{ flex: 1 }}>
         {tab === 'fixtures' && <Fixtures playerId={playerId} />}
         {tab === 'tournament' && <Tournament playerId={playerId} />}
-        {tab === 'leaderboard' && <Leaderboard playerId={playerId} />}
+        {tab === 'rivals' && <Rivals playerId={playerId} initialPlayerId={rivalsPlayerId} />}
+        {tab === 'leaderboard' && <Leaderboard playerId={playerId} onViewRival={handleViewRival} />}
       </main>
 
-      {/* Tab bar */}
       <nav className="tab-bar">
         {TABS.map(t => (
           <button

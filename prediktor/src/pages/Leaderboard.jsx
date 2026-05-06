@@ -4,7 +4,7 @@ import { subscribeLeaderboard } from '../lib/db'
 
 const MEDALS = ['🥇', '🥈', '🥉']
 
-export default function Leaderboard({ playerId }) {
+export default function Leaderboard({ playerId, onViewRival }) {
   const [players, setPlayers] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -68,7 +68,6 @@ export default function Leaderboard({ playerId }) {
                   ...(isMe ? { borderColor: 'rgba(245,200,66,0.4)', background: 'rgba(245,200,66,0.06)' } : {})
                 }}
               >
-                {/* Rank */}
                 <div style={{
                   width: 32, textAlign: 'center', flexShrink: 0,
                   fontFamily: 'var(--font-display)',
@@ -78,7 +77,6 @@ export default function Leaderboard({ playerId }) {
                   {rank <= 3 ? MEDALS[rank - 1] : rank}
                 </div>
 
-                {/* Name */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{
                     fontFamily: 'var(--font-display)',
@@ -89,9 +87,18 @@ export default function Leaderboard({ playerId }) {
                     {player.nickname}
                     {isMe && <span style={{ fontSize: '0.7rem', color: 'var(--gold)', marginLeft: '0.5rem', fontFamily: 'var(--font-body)' }}>YOU</span>}
                   </div>
+                  <button
+                    onClick={() => onViewRival && onViewRival(player.id)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: 'var(--cyan)', fontSize: '0.72rem', padding: 0,
+                      marginTop: '0.15rem', textDecoration: 'underline'
+                    }}
+                  >
+                    View picks
+                  </button>
                 </div>
 
-                {/* Points */}
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
                   <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.4rem', color: isMe ? 'var(--gold)' : 'var(--white)' }}>
                     {player.totalPoints || 0}
