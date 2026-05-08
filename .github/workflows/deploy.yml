@@ -8,14 +8,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install dependencies
+      - name: Install app dependencies
         run: npm install
         working-directory: prediktor
 
@@ -33,7 +33,15 @@ jobs:
           VITE_ADMIN_PASS: ${{ secrets.VITE_ADMIN_PASS }}
           VITE_ODDS_API_KEY: ${{ secrets.VITE_ODDS_API_KEY }}
 
-      - name: Deploy to Firebase
+      - name: Install functions dependencies
+        run: npm install
+        working-directory: prediktor/functions
+
+      - name: Deploy functions to Firebase
+        run: npx firebase-tools deploy --only functions --project ${{ secrets.VITE_FIREBASE_PROJECT_ID }} --token ${{ secrets.FIREBASE_TOKEN }}
+        working-directory: prediktor
+
+      - name: Deploy hosting to Firebase
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
