@@ -63,12 +63,12 @@ function groupByStage(fixtures) {
   }, {})
 }
 
-function NumInput({ value, onChange, disabled, large }) {
+function NumInput({ value, onChange, disabled, large, min = 0 }) {
   return (
     <input
-      type="number" min={0} max={20}
+      type="number" min={min} max={20}
       value={value}
-      onChange={e => onChange(e.target.value)}
+      onChange={e => { const v = e.target.value; if (v === '' || Number(v) >= min) onChange(v) }}
       disabled={disabled}
       style={{
         width: large ? '4rem' : '3.2rem',
@@ -198,9 +198,9 @@ function FixtureRow({ fixture, prediction, onSave, locked }) {
         <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border)' }}>
           <div style={{ fontSize: '0.72rem', color: 'var(--cyan)', textAlign: 'center', marginBottom: '0.4rem' }}>After Extra Time (cumulative score)</div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}>
-            <NumInput value={hET} onChange={setHET} disabled={locked} />
+            <NumInput value={hET} onChange={setHET} disabled={locked} min={Number(h90) || 0} />
             <span style={{ fontFamily: 'var(--font-display)', fontSize: '1.3rem', color: 'var(--muted)' }}>-</span>
-            <NumInput value={aET} onChange={setAET} disabled={locked} />
+            <NumInput value={aET} onChange={setAET} disabled={locked} min={Number(a90) || 0} />
           </div>
         </div>
       )}
