@@ -31,6 +31,7 @@ jobs:
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
           VITE_FOOTBALL_API_KEY: ${{ secrets.VITE_FOOTBALL_API_KEY }}
           VITE_ADMIN_PASS: ${{ secrets.VITE_ADMIN_PASS }}
+          VITE_ODDS_API_KEY: ${{ secrets.VITE_ODDS_API_KEY }}
 
       - name: Deploy to Firebase
         uses: FirebaseExtended/action-hosting-deploy@v0
