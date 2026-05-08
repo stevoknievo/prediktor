@@ -93,29 +93,6 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
   }
 })
 
-// Scheduled function — runs every 2 hours during tournament
-exports.scheduledSync = functions.pubsub
-  .schedule('every 2 hours')
-  .onRun(async () => {
-    try {
-      const result = await apiFetch(`/fixtures?league=${WC_LEAGUE_ID}&season=${WC_SEASON}&status=FT-AET-PEN`)
-      if (!result.response) return null
-
-      const batch = db.batch()
-      for (const f of result.response) {
-        const normalized = normalizeFixture(f)
-        if (normalized.completed) {
-          batch.set(db.collection('fixtures').doc(normalized.id), normalized, { merge: true })
-        }
-      }
-      await batch.commit()
-      console.log(`Scheduled sync: updated ${result.response.length} completed fixtures`)
-    } catch (err) {
-      console.error('scheduledSync error:', err)
-    }
-    return null
-  })
-
 // ── Scout Report functions ────────────────────────────────────────────────
 
 /**
