@@ -115,3 +115,95 @@ exports.scheduledSync = functions.pubsub
     }
     return null
   })
+
+// ── Scout Report functions ────────────────────────────────────────────────
+
+/**
+ * Fetch tournament winner odds from The Odds API
+ */
+exports.getTournamentOdds = functions.https.onCall(async (data, context) => {
+  const apiKey = functions.config().odds?.api_key
+  if (!apiKey) return { success: false, odds: null }
+
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'api.the-odds-api.com',
+      path: `/v4/sports/soccer_fifa_world_cup_winner/odds/?apiKey=${apiKey}&regions=uk&markets=outrights&oddsFormat=decimal`,
+      method: 'GET',
+    }
+    const req = https.request(options, res => {
+      let data = ''
+      res.on('data', chunk => { data += chunk })
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data)
+          const odds = {}
+          if (json?.[0]?.bookmakers?.[0]?.markets?.[0]?.outcomes) {
+            json[0].bookmakers[0].markets[0].outcomes.forEach(o => {
+              odds[o.name] = o.price
+            })
+          }
+          resolve({ success: true, odds })
+        } catch (e) {
+          resolve({ success: false, odds: null })
+        }
+      })
+    })
+    req.on('error', () => resolve({ success: false, odds: null }))
+    req.end()
+  })
+})
+
+/**
+ * Generate scout report via Anthropic API
+ */
+exports.generateScoutReport = functions.https.onCall(async (data, context) => {
+  const anthropicKey = functions.config().anthropic?.api_key
+  if (!anthropicKey) {
+    return { success: false, error: 'Anthropic API key not configured' }
+  }
+
+  const { prompt } = data
+  if (!prompt) return { success: false, error: 'No prompt provided' }
+
+  return new Promise((resolve) => {
+    const body = JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      messages: [{ role: 'user', content: prompt }]
+    })
+
+    const options = {
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Length': Buffer.byteLength(body)
+      }
+    }
+
+    const req = https.request(options, res => {
+      let responseData = ''
+      res.on('data', chunk => { responseData += chunk })
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(responseData)
+          const text = json.content?.[0]?.text
+          if (text) {
+            resolve({ success: true, report: text })
+          } else {
+            resolve({ success: false, error: 'No content in response', raw: responseData.substring(0, 200) })
+          }
+        } catch (e) {
+          resolve({ success: false, error: e.message })
+        }
+      })
+    })
+    req.on('error', e => resolve({ success: false, error: e.message }))
+    req.write(body)
+    req.end()
+  })
+})
