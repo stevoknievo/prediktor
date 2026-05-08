@@ -5,6 +5,7 @@ import Fixtures from './pages/Fixtures'
 import Tournament from './pages/Tournament'
 import Leaderboard from './pages/Leaderboard'
 import Rivals from './pages/Rivals'
+import ScoutReport from './pages/ScoutReport'
 import Admin from './pages/Admin'
 
 const Icons = {
@@ -20,17 +21,24 @@ const Icons = {
       <path d="M6 7H4a2 2 0 00-2 2v1a4 4 0 004 4M18 7h2a2 2 0 012 2v1a4 4 0 01-4 4"/>
     </svg>
   ),
-  leaderboard: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-    </svg>
-  ),
   rivals: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
       <circle cx="9" cy="7" r="4"/>
       <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
       <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+    </svg>
+  ),
+  leaderboard: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+    </svg>
+  ),
+  scout: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <circle cx="11" cy="11" r="8"/>
+      <path d="M21 21l-4.35-4.35"/>
+      <path d="M11 8v6M8 11h6"/>
     </svg>
   ),
 }
@@ -40,6 +48,7 @@ const TABS = [
   { id: 'tournament', label: 'My Picks', icon: Icons.tournament },
   { id: 'rivals', label: 'Rivals', icon: Icons.rivals },
   { id: 'leaderboard', label: 'Standings', icon: Icons.leaderboard },
+  { id: 'scout', label: 'Scout', icon: Icons.scout },
 ]
 
 export default function App() {
@@ -48,6 +57,7 @@ export default function App() {
   const [tab, setTab] = useState('fixtures')
   const [showAdmin, setShowAdmin] = useState(false)
   const [rivalsPlayerId, setRivalsPlayerId] = useState(null)
+  const [tapCount, setTapCount] = useState(0)
 
   useEffect(() => {
     const id = localStorage.getItem('prediktor_player_id')
@@ -55,7 +65,6 @@ export default function App() {
     if (id && name) { setPlayerId(id); setNickname(name) }
   }, [])
 
-  const [tapCount, setTapCount] = useState(0)
   function handleLogoTap() {
     const next = tapCount + 1
     setTapCount(next)
@@ -88,11 +97,7 @@ export default function App() {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <nav className="nav">
-        <button
-          className="nav-logo"
-          style={{ background: 'none', border: 'none', cursor: 'pointer' }}
-          onClick={handleLogoTap}
-        >
+        <button className="nav-logo" style={{ background: 'none', border: 'none', cursor: 'pointer' }} onClick={handleLogoTap}>
           THE PREDIKTOR
         </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -106,15 +111,12 @@ export default function App() {
         {tab === 'tournament' && <Tournament playerId={playerId} />}
         {tab === 'rivals' && <Rivals playerId={playerId} initialPlayerId={rivalsPlayerId} />}
         {tab === 'leaderboard' && <Leaderboard playerId={playerId} onViewRival={handleViewRival} />}
+        {tab === 'scout' && <ScoutReport playerId={playerId} nickname={nickname} />}
       </main>
 
       <nav className="tab-bar">
         {TABS.map(t => (
-          <button
-            key={t.id}
-            className={`tab-item ${tab === t.id ? 'active' : ''}`}
-            onClick={() => setTab(t.id)}
-          >
+          <button key={t.id} className={`tab-item ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
             {t.icon}
             {t.label}
           </button>
