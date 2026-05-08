@@ -122,7 +122,7 @@ exports.scheduledSync = functions.pubsub
  * Fetch tournament winner odds from The Odds API
  */
 exports.getTournamentOdds = functions.https.onCall(async (data, context) => {
-  const apiKey = functions.config().odds?.api_key
+  const apiKey = process.env.ODDS_API_KEY
   if (!apiKey) return { success: false, odds: null }
 
   return new Promise((resolve) => {
@@ -158,7 +158,7 @@ exports.getTournamentOdds = functions.https.onCall(async (data, context) => {
  * Generate scout report via Anthropic API
  */
 exports.generateScoutReport = functions.https.onCall(async (data, context) => {
-  const anthropicKey = functions.config().anthropic?.api_key
+  const anthropicKey = process.env.ANTHROPIC_API_KEY
   if (!anthropicKey) {
     return { success: false, error: 'Anthropic API key not configured' }
   }
