@@ -1,24 +1,19 @@
 name: Deploy to Firebase Hosting
-
 on:
   push:
     branches: [ main ]
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-
       - name: Install app dependencies
         run: npm install
         working-directory: prediktor
-
       - name: Build
         run: npm run build
         working-directory: prediktor
@@ -32,15 +27,16 @@ jobs:
           VITE_FOOTBALL_API_KEY: ${{ secrets.VITE_FOOTBALL_API_KEY }}
           VITE_ADMIN_PASS: ${{ secrets.VITE_ADMIN_PASS }}
           VITE_ODDS_API_KEY: ${{ secrets.VITE_ODDS_API_KEY }}
-
       - name: Install functions dependencies
         run: npm install
         working-directory: prediktor/functions
-
+      - name: Write service account
+        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > ${{ runner.temp }}/service-account.json
       - name: Deploy functions to Firebase
-        run: npx firebase-tools deploy --only functions --project ${{ secrets.VITE_FIREBASE_PROJECT_ID }} --token ${{ secrets.FIREBASE_TOKEN }}
+        run: npx firebase-tools deploy --only functions --project ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
         working-directory: prediktor
-
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/service-account.json
       - name: Deploy hosting to Firebase
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
