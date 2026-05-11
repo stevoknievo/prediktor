@@ -144,6 +144,36 @@ if (!anthropicKey) {
   const { prompt } = data
   if (!prompt) return { success: false, error: 'No prompt provided' }
 
+  // Fetch odds server-side to avoid CORS
+  let oddsText = 'Odds unavailable'
+  try {
+    const oddsDoc = await db.collection('meta').doc('secrets').get()
+    const oddsKey = oddsDoc.data()?.oddsApiKey
+    if (oddsKey) {
+      const oddsResult = await new Promise((resolve) => {
+        const oddsOptions = {
+          hostname: 'api.the-odds-api.com',
+          path: `/v4/sports/soccer_fifa_world_cup_winner/odds/?apiKey=${oddsKey}&regions=uk&markets=outrights&oddsFormat=decimal`,
+          method: 'GET',
+        }
+        const req = https.request(oddsOptions, res => {
+          let d = ''
+          res.on('data', chunk => { d += chunk })
+          res.on('end', () => {
+            try {
+              const json = JSON.parse(d)
+              const outcomes = json?.[0]?.bookmakers?.[0]?.markets?.[0]?.outcomes || []
+              resolve(outcomes.slice(0, 15).map(o => `${o.name}: ${o.price}`).join(', '))
+            } catch { resolve('Odds unavailable') }
+          })
+        })
+        req.on('error', () => resolve('Odds unavailable'))
+        req.end()
+      })
+      oddsText = oddsResult
+    }
+  } catch { oddsText = 'Odds unavailable' }
+
   return new Promise((resolve) => {
     const body = JSON.stringify({
       model: 'claude-sonnet-4-5',
