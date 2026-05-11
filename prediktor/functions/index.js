@@ -135,7 +135,7 @@ exports.getTournamentOdds = functions.https.onCall(async (data, context) => {
  * Generate scout report via Anthropic API
  */
 exports.generateScoutReport = functions.https.onCall(async (data, context) => {
-  const anthropicKey = process.env.ANTHROPIC_API_KEY
+  const anthropicKey = process.env.ANTHROPIC_API_KEY || functions.config().anthropic?.api_key
   if (!anthropicKey) {
     return { success: false, error: 'Anthropic API key not configured' }
   }
