@@ -1,4 +1,4 @@
-// functions/index.js
+// functions/index.js v3
 // Firebase Cloud Function — proxies API-Football calls server-side
 // avoiding CORS issues from the browser
 //
