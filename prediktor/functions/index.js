@@ -168,16 +168,18 @@ if (!anthropicKey) {
       res.on('data', chunk => { responseData += chunk })
       res.on('end', () => {
         try {
-          const json = JSON.parse(responseData)
-          const text = json.content?.[0]?.text
-          if (text) {
-            resolve({ success: true, report: text })
-          } else {
-            resolve({ success: false, error: 'No content in response', raw: responseData.substring(0, 200) })
-          }
-        } catch (e) {
-          resolve({ success: false, error: e.message })
-        }
+  const json = JSON.parse(responseData)
+  const text = json.content?.[0]?.text
+  if (text) {
+    resolve({ success: true, report: text })
+  } else {
+    console.error('Unexpected response:', responseData.substring(0, 500))
+    resolve({ success: false, error: json.error?.message || 'No content in response', raw: responseData.substring(0, 200) })
+  }
+} catch (e) {
+  console.error('Parse error:', e.message, responseData.substring(0, 200))
+  resolve({ success: false, error: e.message })
+}
       })
     })
     req.on('error', e => resolve({ success: false, error: e.message }))
