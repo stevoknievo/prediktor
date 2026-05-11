@@ -1,9 +1,6 @@
-// functions/index.js v3
+// functions/index.js v4
 // Firebase Cloud Function — proxies API-Football calls server-side
 // avoiding CORS issues from the browser
-//
-// Deploy with: firebase deploy --only functions
-// (handled automatically by GitHub Actions)
 
 const functions = require('firebase-functions')
 const admin = require('firebase-admin')
@@ -21,7 +18,7 @@ function apiFetch(path) {
       hostname: 'v3.football.api-sports.io',
       path,
       method: 'GET',
-      headers: { 'x-apisports-key': functions.config().football.api_key }
+      headers: { 'x-apisports-key': functions.config().football?.api_key || '' }
     }
     const req = https.request(options, res => {
       let data = ''
@@ -42,7 +39,6 @@ function normalizeFixture(f) {
   const goals = f.goals
   const score = f.score
   const isKnockout = ['Round of 32', 'Round of 16', 'Quarter-finals', 'Semi-finals', 'Final', '3rd Place Final'].includes(f.league?.round)
-
   return {
     id: String(fixture.id),
     date: fixture.date,
@@ -67,24 +63,18 @@ function normalizeFixture(f) {
   }
 }
 
-// HTTP function — called from Admin panel
+// Sync Fixtures
 exports.syncFixtures = functions.https.onCall(async (data, context) => {
   try {
     const result = await apiFetch(`/fixtures?league=${WC_LEAGUE_ID}&season=${WC_SEASON}`)
-
     if (!result.response || result.response.length === 0) {
       return { success: false, count: 0, message: 'No fixtures returned from API' }
     }
-
     const fixtures = result.response.map(normalizeFixture)
     const batch = db.batch()
-
     for (const f of fixtures) {
-      // Only update score/status fields for existing fixtures to preserve our seeded data
-      const ref = db.collection('fixtures').doc(f.id)
-      batch.set(ref, f, { merge: true })
+      batch.set(db.collection('fixtures').doc(f.id), f, { merge: true })
     }
-
     await batch.commit()
     return { success: true, count: fixtures.length }
   } catch (err) {
@@ -93,15 +83,10 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
   }
 })
 
-// ── Scout Report functions (v2) ───────────────────────────────────────────
-
-/**
- * Fetch tournament winner odds from The Odds API
- */
+// Tournament Odds
 exports.getTournamentOdds = functions.https.onCall(async (data, context) => {
   const apiKey = process.env.ODDS_API_KEY
   if (!apiKey) return { success: false, odds: null }
-
   return new Promise((resolve) => {
     const options = {
       hostname: 'api.the-odds-api.com',
@@ -116,9 +101,7 @@ exports.getTournamentOdds = functions.https.onCall(async (data, context) => {
           const json = JSON.parse(data)
           const odds = {}
           if (json?.[0]?.bookmakers?.[0]?.markets?.[0]?.outcomes) {
-            json[0].bookmakers[0].markets[0].outcomes.forEach(o => {
-              odds[o.name] = o.price
-            })
+            json[0].bookmakers[0].markets[0].outcomes.forEach(o => { odds[o.name] = o.price })
           }
           resolve({ success: true, odds })
         } catch (e) {
@@ -131,50 +114,51 @@ exports.getTournamentOdds = functions.https.onCall(async (data, context) => {
   })
 })
 
-/**
- * Generate scout report via Anthropic API
- */
+// Generate Scout Report
 exports.generateScoutReport = functions.https.onCall(async (data, context) => {
+  // 1. Get keys from Firestore
   const secretDoc = await db.collection('meta').doc('secrets').get()
-const anthropicKey = secretDoc.data()?.anthropicKey
-if (!anthropicKey) {
-  return { success: false, error: 'Anthropic API key not configured' }
-}
+  const anthropicKey = secretDoc.data()?.anthropicKey
+  if (!anthropicKey) {
+    return { success: false, error: 'Anthropic API key not configured' }
+  }
 
+  // 2. Validate prompt
   let { prompt } = data
-prompt = prompt.replace('To be provided by the server', oddsText)
   if (!prompt) return { success: false, error: 'No prompt provided' }
 
-  // Fetch odds server-side to avoid CORS
+  // 3. Fetch odds server-side
   let oddsText = 'Odds unavailable'
   try {
-    const oddsDoc = await db.collection('meta').doc('secrets').get()
-    const oddsKey = oddsDoc.data()?.oddsApiKey
+    const oddsKey = secretDoc.data()?.oddsApiKey
     if (oddsKey) {
-      const oddsResult = await new Promise((resolve) => {
-        const oddsOptions = {
+      oddsText = await new Promise((resolve) => {
+        const options = {
           hostname: 'api.the-odds-api.com',
           path: `/v4/sports/soccer_fifa_world_cup_winner/odds/?apiKey=${oddsKey}&regions=uk&markets=outrights&oddsFormat=decimal`,
           method: 'GET',
         }
-        const req = https.request(oddsOptions, res => {
+        const req = https.request(options, res => {
           let d = ''
           res.on('data', chunk => { d += chunk })
           res.on('end', () => {
             try {
               const json = JSON.parse(d)
               const outcomes = json?.[0]?.bookmakers?.[0]?.markets?.[0]?.outcomes || []
-              resolve(outcomes.slice(0, 15).map(o => `${o.name}: ${o.price}`).join(', '))
+              resolve(outcomes.slice(0, 15).map(o => `${o.name}: ${o.price}`).join(', ') || 'Odds unavailable')
             } catch { resolve('Odds unavailable') }
           })
         })
         req.on('error', () => resolve('Odds unavailable'))
         req.end()
       })
-      oddsText = oddsResult
     }
   } catch { oddsText = 'Odds unavailable' }
 
+  // 4. Inject odds into prompt
+  prompt = prompt.replace('To be provided by the server', oddsText)
+
+  // 5. Call Anthropic
   return new Promise((resolve) => {
     const body = JSON.stringify({
       model: 'claude-sonnet-4-5',
@@ -199,18 +183,18 @@ prompt = prompt.replace('To be provided by the server', oddsText)
       res.on('data', chunk => { responseData += chunk })
       res.on('end', () => {
         try {
-  const json = JSON.parse(responseData)
-  const text = json.content?.[0]?.text
-  if (text) {
-    resolve({ success: true, report: text })
-  } else {
-    console.error('Unexpected response:', responseData.substring(0, 500))
-    resolve({ success: false, error: json.error?.message || 'No content in response', raw: responseData.substring(0, 200) })
-  }
-} catch (e) {
-  console.error('Parse error:', e.message, responseData.substring(0, 200))
-  resolve({ success: false, error: e.message })
-}
+          const json = JSON.parse(responseData)
+          const text = json.content?.[0]?.text
+          if (text) {
+            resolve({ success: true, report: text })
+          } else {
+            console.error('Unexpected response:', responseData.substring(0, 500))
+            resolve({ success: false, error: json.error?.message || 'No content in response' })
+          }
+        } catch (e) {
+          console.error('Parse error:', e.message, responseData.substring(0, 200))
+          resolve({ success: false, error: e.message })
+        }
       })
     })
     req.on('error', e => resolve({ success: false, error: e.message }))
