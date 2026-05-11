@@ -93,7 +93,7 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
   }
 })
 
-// ── Scout Report functions ────────────────────────────────────────────────
+// ── Scout Report functions (v2) ───────────────────────────────────────────
 
 /**
  * Fetch tournament winner odds from The Odds API
