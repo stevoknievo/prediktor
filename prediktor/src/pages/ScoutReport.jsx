@@ -125,13 +125,8 @@ export default function ScoutReport({ playerId, nickname }) {
       const generateScoutReportFn = httpsCallable(functions, 'generateScoutReport')
 
       // Fetch data in parallel
-      const [allData, oddsResult] = await Promise.all([
-        getAllPredictions(),
-        getTournamentOdds().catch(() => ({ data: { odds: null } }))
-      ])
-
-      const odds = oddsResult?.data?.odds || null
-      const prompt = buildPrompt(playerId, nickname, allData, odds)
+      const allData = await getAllPredictions()
+      const prompt = buildPrompt(playerId, nickname, allData, null)
 
       const result = await generateScoutReportFn({ prompt })
 
