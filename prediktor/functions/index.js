@@ -141,7 +141,8 @@ if (!anthropicKey) {
   return { success: false, error: 'Anthropic API key not configured' }
 }
 
-  const { prompt } = data
+  let { prompt } = data
+prompt = prompt.replace('To be provided by the server', oddsText)
   if (!prompt) return { success: false, error: 'No prompt provided' }
 
   // Fetch odds server-side to avoid CORS
