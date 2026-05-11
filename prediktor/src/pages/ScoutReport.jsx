@@ -77,7 +77,7 @@ THEIR BOLDEST MATCH PREDICTIONS (highest scoring/most decisive):
 ${boldPicks.map(p => `Fixture ${p.fixtureId}: ${p.home}-${p.away}`).join('\n') || 'None yet'}
 
 BOOKMAKER ODDS FOR TOURNAMENT WINNER (decimal):
-${odds ? Object.entries(odds).slice(0, 15).map(([t, o]) => `${t}: ${o}`).join(', ') : 'Odds unavailable — use general football knowledge'}
+${oddsText}
 
 HOW MANY OTHERS PICKED THE SAME WINNER:
 ${myTournPred.tournamentWinner ? `${winnerPickCounts[myTournPred.tournamentWinner] || 0} player(s) also picked ${myTournPred.tournamentWinner}` : 'No winner picked yet'}
