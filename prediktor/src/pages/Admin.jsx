@@ -21,9 +21,25 @@ function PlayerManager({ addLog }) {
   async function deletePlayer(player) {
     if (!confirm(`Delete ${player.nickname}? This cannot be undone.`)) return
     try {
+      const { getDocs, query, where } = await import('firebase/firestore')
+
+      // Delete player doc
       await deleteDoc(doc(db, 'players', player.id))
+
+      // Delete tournament prediction
+      await deleteDoc(doc(db, 'tournamentPredictions', player.id))
+
+      // Delete scout report
+      await deleteDoc(doc(db, 'scoutReports', player.id))
+
+      // Delete all match predictions
+      const predsSnap = await getDocs(
+        query(collection(db, 'predictions'), where('playerId', '==', player.id))
+      )
+      for (const d of predsSnap.docs) await deleteDoc(d.ref)
+
       setPlayers(prev => prev.filter(p => p.id !== player.id))
-      addLog(`✓ Deleted player: ${player.nickname}`, 'success')
+      addLog(`✓ Deleted ${player.nickname} and all their data`, 'success')
     } catch (err) {
       addLog(`✗ Error deleting player: ${err.message}`, 'error')
     }
