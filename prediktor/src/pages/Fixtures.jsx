@@ -20,19 +20,6 @@ const STAGE_EMOJI = {
   'Semi-final':'🌟','3rd Place Final':'🥉','Final':'🏆'
 }
 
-// Maps each knockout stage to its fixture IDs in bracket order
-// Bracket order matters — winners of m073 vs m074 meet in R16, etc.
-const KNOCKOUT_IDS = {
-  'Round of 32':    ['m073','m074','m075','m076','m077','m078','m079','m080','m081','m082','m083','m084','m085','m086','m087','m088'],
-  'Round of 16':    ['m089','m090','m091','m092','m093','m094','m095','m096'],
-  'Quarter-final':  ['m097','m098','m099','m100'],
-  'Semi-final':     ['m101','m102'],
-  'Final':          ['m104'],
-  '3rd Place Final':['m103'],
-}
-
-// Which pairs from R32 feed into each R16 fixture
-// R16 m089 = winner of m073 vs winner of m074, etc.
 const R32_TO_R16 = {
   'm089': ['m073','m074'], 'm090': ['m075','m076'],
   'm091': ['m077','m078'], 'm092': ['m079','m080'],
@@ -49,7 +36,6 @@ const QF_TO_SF = {
 const SF_TO_FINAL = {
   'm104': ['m101','m102'],
 }
-// Losers of SF go to 3rd place
 const SF_TO_3RD = {
   'm103': ['m101','m102'],
 }
@@ -85,8 +71,7 @@ function NumInput({ value, onChange, disabled, large, min = 0 }) {
 
 function FixtureRow({ fixture, prediction, onSave, locked }) {
   const isKnockout = fixture.isKnockout
-  const isTBD = false // Always allow predictions even if teams not yet resolved
-  const isUnresolved = fixture.homeTeam === 'TBD' || fixture.awayTeam === 'TBD'
+  const isTBD = fixture.homeTeam === 'TBD' || fixture.awayTeam === 'TBD'
   const actual = fixture.completed
 
   const [h90, setH90] = useState(prediction?.score90Home ?? '')
@@ -113,7 +98,7 @@ function FixtureRow({ fixture, prediction, onSave, locked }) {
   }, [prediction])
 
   useEffect(() => {
-    if (locked || actual) return
+    if (locked || actual || isTBD) return
     if (h90 === '' || a90 === '') return
     if (showET && (hET === '' || aET === '')) return
     if (showPen && (hPen === '' || aPen === '')) return
@@ -177,6 +162,10 @@ function FixtureRow({ fixture, prediction, onSave, locked }) {
           <div style={{ fontFamily: 'var(--font-display)', fontSize: isKnockout ? '1.8rem' : '1.5rem', color: 'var(--gold)' }}>
             {scoreStr}
           </div>
+        ) : isTBD ? (
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '0.9rem', color: 'var(--muted)', textAlign: 'center' }}>
+            vs
+          </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <NumInput value={h90} onChange={setH90} disabled={locked} large={isKnockout} />
@@ -215,7 +204,7 @@ function FixtureRow({ fixture, prediction, onSave, locked }) {
         </div>
       )}
 
-      {prediction && !actual && !locked && (
+      {prediction && !actual && !locked && !isTBD && (
         <div style={{ marginTop: '0.4rem', textAlign: 'right', fontSize: '0.72rem', color: 'var(--muted)' }}>
           Saved: {prediction.score90Home}-{prediction.score90Away}
           {prediction.scoreETHome !== undefined ? ` · ET: ${prediction.scoreETHome}-${prediction.scoreETAway}` : ''}
@@ -255,12 +244,9 @@ export default function Fixtures({ playerId }) {
     setPredictions(prev => ({ ...prev, [fixtureId]: { ...prev[fixtureId], ...data, fixtureId } }))
   }
 
-  // Build fixtures map
   const fixturesMap = {}
   fixturesArr.forEach(f => { fixturesMap[f.id] = f })
 
-  // ── Cascade knockout resolution ──────────────────────────────────────────
-  // Helper: get winner of a fixture from predictions
   function getWinner(fid, resolvedTeams) {
     const pred = predictions[fid]
     const fixture = resolvedTeams[fid] || fixturesMap[fid]
@@ -268,7 +254,6 @@ export default function Fixtures({ playerId }) {
     return getKnockoutWinner(pred, fixture)
   }
 
-  // Helper: get LOSER of a fixture (for 3rd place)
   function getLoser(fid, resolvedTeams) {
     const pred = predictions[fid]
     const fixture = resolvedTeams[fid] || fixturesMap[fid]
@@ -278,10 +263,8 @@ export default function Fixtures({ playerId }) {
     return winner === fixture.homeTeam ? fixture.awayTeam : fixture.homeTeam
   }
 
-  // Start with base fixtures
   const resolvedTeams = { ...fixturesMap }
 
-  // 1. Resolve Round of 32 from group predictions
   try {
     const r32 = generateRoundOf32(fixturesMap, predictions)
     r32.forEach(r => {
@@ -291,68 +274,43 @@ export default function Fixtures({ playerId }) {
     })
   } catch (e) {}
 
-  // 2. Resolve Round of 16 from R32 winners
   Object.entries(R32_TO_R16).forEach(([r16id, [fid1, fid2]]) => {
     const home = getWinner(fid1, resolvedTeams)
     const away = getWinner(fid2, resolvedTeams)
     if (resolvedTeams[r16id]) {
-      resolvedTeams[r16id] = {
-        ...resolvedTeams[r16id],
-        homeTeam: home || 'TBD',
-        awayTeam: away || 'TBD',
-      }
+      resolvedTeams[r16id] = { ...resolvedTeams[r16id], homeTeam: home || 'TBD', awayTeam: away || 'TBD' }
     }
   })
 
-  // 3. Resolve Quarter-finals from R16 winners
   Object.entries(R16_TO_QF).forEach(([qfid, [fid1, fid2]]) => {
     const home = getWinner(fid1, resolvedTeams)
     const away = getWinner(fid2, resolvedTeams)
     if (resolvedTeams[qfid]) {
-      resolvedTeams[qfid] = {
-        ...resolvedTeams[qfid],
-        homeTeam: home || 'TBD',
-        awayTeam: away || 'TBD',
-      }
+      resolvedTeams[qfid] = { ...resolvedTeams[qfid], homeTeam: home || 'TBD', awayTeam: away || 'TBD' }
     }
   })
 
-  // 4. Resolve Semi-finals from QF winners
   Object.entries(QF_TO_SF).forEach(([sfid, [fid1, fid2]]) => {
     const home = getWinner(fid1, resolvedTeams)
     const away = getWinner(fid2, resolvedTeams)
     if (resolvedTeams[sfid]) {
-      resolvedTeams[sfid] = {
-        ...resolvedTeams[sfid],
-        homeTeam: home || 'TBD',
-        awayTeam: away || 'TBD',
-      }
+      resolvedTeams[sfid] = { ...resolvedTeams[sfid], homeTeam: home || 'TBD', awayTeam: away || 'TBD' }
     }
   })
 
-  // 5. Resolve Final from SF winners
   Object.entries(SF_TO_FINAL).forEach(([fid, [sf1, sf2]]) => {
     const home = getWinner(sf1, resolvedTeams)
     const away = getWinner(sf2, resolvedTeams)
     if (resolvedTeams[fid]) {
-      resolvedTeams[fid] = {
-        ...resolvedTeams[fid],
-        homeTeam: home || 'TBD',
-        awayTeam: away || 'TBD',
-      }
+      resolvedTeams[fid] = { ...resolvedTeams[fid], homeTeam: home || 'TBD', awayTeam: away || 'TBD' }
     }
   })
 
-  // 6. Resolve 3rd place from SF losers
   Object.entries(SF_TO_3RD).forEach(([fid, [sf1, sf2]]) => {
     const home = getLoser(sf1, resolvedTeams)
     const away = getLoser(sf2, resolvedTeams)
     if (resolvedTeams[fid]) {
-      resolvedTeams[fid] = {
-        ...resolvedTeams[fid],
-        homeTeam: home || 'TBD',
-        awayTeam: away || 'TBD',
-      }
+      resolvedTeams[fid] = { ...resolvedTeams[fid], homeTeam: home || 'TBD', awayTeam: away || 'TBD' }
     }
   })
 
@@ -371,7 +329,6 @@ export default function Fixtures({ playerId }) {
     : stageFilter === 'knockout' ? knockoutStages
     : sortedStages
 
-  // Progress
   const groupFixtureIds = Object.values(GROUP_FIXTURES).flat()
   const predictedCount = groupFixtureIds.filter(fid => {
     const p = predictions[fid]
