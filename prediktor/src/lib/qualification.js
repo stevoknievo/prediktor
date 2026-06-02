@@ -1,8 +1,7 @@
-// src/lib/qualification.js v2
-// Implements official FIFA 2026 World Cup Round of 32 bracket
-// Based on confirmed ESPN/Sky Sports fixture schedule and FIFA Annex C rules
+// src/lib/qualification.js v3
+// CORRECT bracket based on official FIFA schedule (verified against Hermann Baum spreadsheet)
+// R32 fixture numbers match our seeded fixture IDs m073-m088
 
-// ── Group definitions ─────────────────────────────────────────────────────
 export const GROUPS = {
   'Group A': ['Mexico', 'South Africa', 'South Korea', 'Czech Republic'],
   'Group B': ['Canada', 'Bosnia & Herzegovina', 'Qatar', 'Switzerland'],
@@ -33,29 +32,25 @@ export const GROUP_FIXTURES = {
   'Group L': ['m067','m068','m069','m070','m071','m072'],
 }
 
-// ── Official R32 Bracket (confirmed from FIFA/ESPN/Sky Sports) ────────────
-// Fixed matchups for group winners vs runners-up:
-// m073: Group C winner vs Group F runner-up
-// m074: Group E winner vs best 3rd from A/B/C/D/F
-// m075: Group F winner vs Group C runner-up
-// m076: Group E runner-up vs Group I runner-up  
-// m077: Group I winner vs best 3rd from C/D/F/G/H
-// m078: Group A winner vs best 3rd from C/E/F/H/I
-// m079: Group L winner vs best 3rd from E/H/I/J/K
-// m080: Group G winner vs best 3rd from A/E/H/I/J
-// m081: Group D winner vs best 3rd from B/E/F/I/J
-// m082: Group A runner-up vs Group B runner-up
-// m083: Group B winner vs best 3rd from A/D/E/F/G
-// m084: Group H winner vs Group J runner-up
-// m085: Group J winner vs Group H runner-up
-// m086: Group K winner vs best 3rd from D/E/I/J/L
-// m087: Group D runner-up vs Group K runner-up
-// m088: Group G runner-up vs Group L runner-up (corrected from previous)
+// ── Official R32 bracket (verified from FIFA schedule) ────────────────────
+// m073 = FIFA match 73: 2A vs 2B
+// m074 = FIFA match 74: 1E vs 3-ABCDF
+// m075 = FIFA match 75: 1F vs 2C
+// m076 = FIFA match 76: 1C vs 2F
+// m077 = FIFA match 77: 1I vs 3-CDFGH
+// m078 = FIFA match 78: 2E vs 2I
+// m079 = FIFA match 79: 1A vs 3-CEFHI
+// m080 = FIFA match 80: 1L vs 3-EHIJK
+// m081 = FIFA match 81: 1D vs 3-BEFIJ
+// m082 = FIFA match 82: 1G vs 3-AEHIJ
+// m083 = FIFA match 83: 2K vs 2L
+// m084 = FIFA match 84: 1H vs 2J
+// m085 = FIFA match 85: 1B vs 3-EFGIJ
+// m086 = FIFA match 86: 1J vs 2H
+// m087 = FIFA match 87: 1K vs 3-DEIJL
+// m088 = FIFA match 88: 2D vs 2G
 
-// Note on 3rd place slots: These use group pools but each qualifying 3rd place
-// team can only appear in ONE slot. We implement FIFA Annex C assignment below.
-
-// ── Calculate group standings ─────────────────────────────────────────────
+// ── Group standings calculation ───────────────────────────────────────────
 
 function getResult(h, a) {
   if (h > a) return 'home'
@@ -145,7 +140,6 @@ export function calculateAllQualifiers(fixtures, predictions) {
     if (s.length >= 3) thirdPlaceTeams.push({ ...s[2], group })
   }
 
-  // Rank 3rd place teams: points → gd → gf → alphabetical
   thirdPlaceTeams.sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points
     if (b.gd !== a.gd) return b.gd - a.gd
@@ -167,51 +161,40 @@ export function calculateAllQualifiers(fixtures, predictions) {
   return { standings, qualifiers, best8Third }
 }
 
-// ── FIFA Annex C: assign 3rd place teams to their R32 slot ───────────────
-// Each R32 "third place slot" has a pool of eligible groups.
-// Once we know which 8 groups qualified 3rd place teams,
-// we assign each team to exactly one slot using a greedy match
-// that ensures no team appears twice and no team faces their own group.
+// ── Third place assignment (FIFA Annex C) ─────────────────────────────────
+// Each slot has a pool of groups whose 3rd place team can fill it.
+// Corrected pools from official schedule.
 
 const THIRD_PLACE_SLOTS = [
-  { fixture: 'm074', pool: ['Group A','Group B','Group C','Group D','Group F'], versusGroup: 'Group E' },
-  { fixture: 'm077', pool: ['Group C','Group D','Group F','Group G','Group H'], versusGroup: 'Group I' },
-  { fixture: 'm078', pool: ['Group C','Group E','Group F','Group H','Group I'], versusGroup: 'Group A' },
-  { fixture: 'm079', pool: ['Group E','Group H','Group I','Group J','Group K'], versusGroup: 'Group L' },
-  { fixture: 'm080', pool: ['Group A','Group E','Group H','Group I','Group J'], versusGroup: 'Group G' },
-  { fixture: 'm081', pool: ['Group B','Group E','Group F','Group I','Group J'], versusGroup: 'Group D' },
-  { fixture: 'm083', pool: ['Group A','Group D','Group E','Group F','Group G'], versusGroup: 'Group B' },
-  { fixture: 'm086', pool: ['Group D','Group E','Group I','Group J','Group L'], versusGroup: 'Group K' },
+  { fixture: 'm074', pool: ['Group A','Group B','Group C','Group D','Group F'] },
+  { fixture: 'm077', pool: ['Group C','Group D','Group F','Group G','Group H'] },
+  { fixture: 'm079', pool: ['Group C','Group E','Group F','Group H','Group I'] },
+  { fixture: 'm080', pool: ['Group E','Group H','Group I','Group J','Group K'] },
+  { fixture: 'm081', pool: ['Group B','Group E','Group F','Group I','Group J'] },
+  { fixture: 'm082', pool: ['Group A','Group E','Group H','Group I','Group J'] },
+  { fixture: 'm085', pool: ['Group E','Group F','Group G','Group I','Group J'] },
+  { fixture: 'm087', pool: ['Group D','Group E','Group I','Group J','Group L'] },
 ]
 
-/**
- * Assign the best 8 third-place teams to their correct R32 slots.
- * Returns a map of fixtureId -> team name.
- */
 export function assignThirdPlaceTeams(best8Third) {
   const qualifiedGroups = new Set(best8Third.map(t => t.group))
   const teamByGroup = {}
   best8Third.forEach(t => { teamByGroup[t.group] = t.team })
 
-  // For each slot, find which of the qualifying groups fit its pool
-  // Use a greedy assignment: sort slots by pool size (ascending) to reduce conflicts
+  // Sort slots by number of eligible groups ascending (most constrained first)
   const sortedSlots = [...THIRD_PLACE_SLOTS].sort((a, b) => {
-    const aEligible = a.pool.filter(g => qualifiedGroups.has(g)).length
-    const bEligible = b.pool.filter(g => qualifiedGroups.has(g)).length
-    return aEligible - bEligible
+    const aElig = a.pool.filter(g => qualifiedGroups.has(g)).length
+    const bElig = b.pool.filter(g => qualifiedGroups.has(g)).length
+    return aElig - bElig
   })
 
-  const assignments = {} // fixtureId -> team
+  const assignments = {}
   const usedGroups = new Set()
 
   for (const slot of sortedSlots) {
-    // Find eligible groups for this slot that haven't been used yet
-    const eligible = slot.pool.filter(g =>
-      qualifiedGroups.has(g) && !usedGroups.has(g)
-    )
-
+    const eligible = slot.pool.filter(g => qualifiedGroups.has(g) && !usedGroups.has(g))
     if (eligible.length > 0) {
-      // Pick the highest-ranked eligible team (best8Third is already sorted by rank)
+      // Pick the highest ranked eligible (best8Third is sorted by rank)
       const bestGroup = best8Third.find(t => eligible.includes(t.group))?.group
       if (bestGroup) {
         assignments[slot.fixture] = teamByGroup[bestGroup]
@@ -223,37 +206,35 @@ export function assignThirdPlaceTeams(best8Third) {
   return assignments
 }
 
-// ── Generate Round of 32 fixtures ─────────────────────────────────────────
+// ── Generate Round of 32 ──────────────────────────────────────────────────
 
 export function generateRoundOf32(fixtures, predictions) {
   const { qualifiers, best8Third } = calculateAllQualifiers(fixtures, predictions)
-  const thirdAssignments = assignThirdPlaceTeams(best8Third)
+  const tp = assignThirdPlaceTeams(best8Third)
 
-  const resolve = (type, group, pos) => {
+  const w = (group, pos) => {
     const q = qualifiers[group]
     if (!q) return 'TBD'
-    if (pos === 1) return q.winner || 'TBD'
-    if (pos === 2) return q.runnerUp || 'TBD'
-    return 'TBD'
+    return (pos === 1 ? q.winner : q.runnerUp) || 'TBD'
   }
 
   return [
-    { id: 'm073', homeTeam: resolve(1,'Group C',1), awayTeam: resolve(1,'Group F',2) },
-    { id: 'm074', homeTeam: resolve(1,'Group E',1), awayTeam: thirdAssignments['m074'] || 'TBD' },
-    { id: 'm075', homeTeam: resolve(1,'Group F',1), awayTeam: resolve(1,'Group C',2) },
-    { id: 'm076', homeTeam: resolve(1,'Group E',2), awayTeam: resolve(1,'Group I',2) },
-    { id: 'm077', homeTeam: resolve(1,'Group I',1), awayTeam: thirdAssignments['m077'] || 'TBD' },
-    { id: 'm078', homeTeam: resolve(1,'Group A',1), awayTeam: thirdAssignments['m078'] || 'TBD' },
-    { id: 'm079', homeTeam: resolve(1,'Group L',1), awayTeam: thirdAssignments['m079'] || 'TBD' },
-    { id: 'm080', homeTeam: resolve(1,'Group G',1), awayTeam: thirdAssignments['m080'] || 'TBD' },
-    { id: 'm081', homeTeam: resolve(1,'Group D',1), awayTeam: thirdAssignments['m081'] || 'TBD' },
-    { id: 'm082', homeTeam: resolve(1,'Group A',2), awayTeam: resolve(1,'Group B',2) },
-    { id: 'm083', homeTeam: resolve(1,'Group B',1), awayTeam: thirdAssignments['m083'] || 'TBD' },
-    { id: 'm084', homeTeam: resolve(1,'Group H',1), awayTeam: resolve(1,'Group J',2) },
-    { id: 'm085', homeTeam: resolve(1,'Group J',1), awayTeam: resolve(1,'Group H',2) },
-    { id: 'm086', homeTeam: resolve(1,'Group K',1), awayTeam: thirdAssignments['m086'] || 'TBD' },
-    { id: 'm087', homeTeam: resolve(1,'Group D',2), awayTeam: resolve(1,'Group K',2) },
-    { id: 'm088', homeTeam: resolve(1,'Group G',2), awayTeam: resolve(1,'Group L',2) },
+    { id: 'm073', homeTeam: w('Group A', 2), awayTeam: w('Group B', 2) },
+    { id: 'm074', homeTeam: w('Group E', 1), awayTeam: tp['m074'] || 'TBD' },
+    { id: 'm075', homeTeam: w('Group F', 1), awayTeam: w('Group C', 2) },
+    { id: 'm076', homeTeam: w('Group C', 1), awayTeam: w('Group F', 2) },
+    { id: 'm077', homeTeam: w('Group I', 1), awayTeam: tp['m077'] || 'TBD' },
+    { id: 'm078', homeTeam: w('Group E', 2), awayTeam: w('Group I', 2) },
+    { id: 'm079', homeTeam: w('Group A', 1), awayTeam: tp['m079'] || 'TBD' },
+    { id: 'm080', homeTeam: w('Group L', 1), awayTeam: tp['m080'] || 'TBD' },
+    { id: 'm081', homeTeam: w('Group D', 1), awayTeam: tp['m081'] || 'TBD' },
+    { id: 'm082', homeTeam: w('Group G', 1), awayTeam: tp['m082'] || 'TBD' },
+    { id: 'm083', homeTeam: w('Group K', 2), awayTeam: w('Group L', 2) },
+    { id: 'm084', homeTeam: w('Group H', 1), awayTeam: w('Group J', 2) },
+    { id: 'm085', homeTeam: w('Group B', 1), awayTeam: tp['m085'] || 'TBD' },
+    { id: 'm086', homeTeam: w('Group J', 1), awayTeam: w('Group H', 2) },
+    { id: 'm087', homeTeam: w('Group K', 1), awayTeam: tp['m087'] || 'TBD' },
+    { id: 'm088', homeTeam: w('Group D', 2), awayTeam: w('Group G', 2) },
   ]
 }
 
@@ -267,14 +248,12 @@ export function getKnockoutWinner(pred, fixture) {
   if (h90 > a90) return fixture.homeTeam
   if (a90 > h90) return fixture.awayTeam
 
-  // Draw — check ET
   const hET = Number(pred.scoreETHome)
   const aET = Number(pred.scoreETAway)
   if (!isNaN(hET) && !isNaN(aET) && pred.scoreETHome !== '' && pred.scoreETAway !== '') {
     if (hET > aET) return fixture.homeTeam
     if (aET > hET) return fixture.awayTeam
 
-    // Still level — check penalties
     const hPen = Number(pred.scorePenHome)
     const aPen = Number(pred.scorePenAway)
     if (!isNaN(hPen) && !isNaN(aPen) && pred.scorePenHome !== '' && pred.scorePenAway !== '') {
