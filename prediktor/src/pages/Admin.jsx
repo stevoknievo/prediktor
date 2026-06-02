@@ -1,7 +1,7 @@
 // src/pages/Admin.jsx
 import { useState, useEffect } from 'react'
 import { getFunctions, httpsCallable } from 'firebase/functions'
-import { saveConfig, getTournamentOutcomes, saveTournamentOutcomes } from '../lib/db'
+import { saveConfig, getTournamentOutcomes, saveTournamentOutcomes, getDeadline } from '../lib/db'
 import { db } from '../lib/firebase'
 import { collection, getDocs, deleteDoc, doc } from 'firebase/firestore'
 
@@ -64,6 +64,7 @@ export default function Admin() {
   const [log, setLog] = useState([])
   const [loading, setLoading] = useState(false)
   const [deadline, setDeadline] = useState('')
+  const [deadlineLoaded, setDeadlineLoaded] = useState(false)
   const [outcomes, setOutcomes] = useState({
     winner: '', topScorer: '', topAssister: '', topCleanSheet: '',
     totalRedCards: '', mostRedCardTeam: '', totalYellowCards: '',
@@ -74,6 +75,16 @@ export default function Admin() {
     if (authed) {
       getTournamentOutcomes().then(o => {
         if (o) setOutcomes(prev => ({ ...prev, ...o }))
+      })
+      getDeadline().then(d => {
+        if (d) {
+          // Convert ISO string to datetime-local format
+          const dt = new Date(d)
+          const local = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000)
+            .toISOString().slice(0, 16)
+          setDeadline(local)
+          setDeadlineLoaded(true)
+        }
       })
     }
   }, [authed])
