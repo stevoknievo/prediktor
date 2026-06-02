@@ -85,7 +85,8 @@ function NumInput({ value, onChange, disabled, large, min = 0 }) {
 
 function FixtureRow({ fixture, prediction, onSave, locked }) {
   const isKnockout = fixture.isKnockout
-  const isTBD = fixture.homeTeam === 'TBD' || fixture.awayTeam === 'TBD'
+  const isTBD = false // Always allow predictions even if teams not yet resolved
+  const isUnresolved = fixture.homeTeam === 'TBD' || fixture.awayTeam === 'TBD'
   const actual = fixture.completed
 
   const [h90, setH90] = useState(prediction?.score90Home ?? '')
@@ -112,7 +113,7 @@ function FixtureRow({ fixture, prediction, onSave, locked }) {
   }, [prediction])
 
   useEffect(() => {
-    if (locked || actual || isTBD) return
+    if (locked || actual) return
     if (h90 === '' || a90 === '') return
     if (showET && (hET === '' || aET === '')) return
     if (showPen && (hPen === '' || aPen === '')) return
@@ -176,8 +177,6 @@ function FixtureRow({ fixture, prediction, onSave, locked }) {
           <div style={{ fontFamily: 'var(--font-display)', fontSize: isKnockout ? '1.8rem' : '1.5rem', color: 'var(--gold)' }}>
             {scoreStr}
           </div>
-        ) : isTBD ? (
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '0.9rem', color: 'var(--muted)' }}>vs</div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <NumInput value={h90} onChange={setH90} disabled={locked} large={isKnockout} />
@@ -216,7 +215,7 @@ function FixtureRow({ fixture, prediction, onSave, locked }) {
         </div>
       )}
 
-      {prediction && !actual && !locked && !isTBD && (
+      {prediction && !actual && !locked && (
         <div style={{ marginTop: '0.4rem', textAlign: 'right', fontSize: '0.72rem', color: 'var(--muted)' }}>
           Saved: {prediction.score90Home}-{prediction.score90Away}
           {prediction.scoreETHome !== undefined ? ` · ET: ${prediction.scoreETHome}-${prediction.scoreETAway}` : ''}
