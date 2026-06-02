@@ -289,6 +289,7 @@ export function calculateAllQualifiers(fixtures, predictions) {
 }
 
 export function assignThirdPlaceTeams(best8Third) {
+  console.log('best8Third length:', best8Third.length, 'key:', best8Third.map(t => t.group.replace('Group ','')).sort().join(''))
   if (best8Third.length < 8) return {}
   // Build lookup key from the 8 qualifying group letters, sorted
   const key = best8Third.map(t => t.group.replace('Group ','')).sort().join('')
