@@ -2,6 +2,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { subscribeFixtures, getPlayerPredictions, savePrediction, getDeadline } from '../lib/db'
 import { generateRoundOf32, getKnockoutWinner, GROUP_FIXTURES } from '../lib/qualification'
+import { collection, getDocs, doc, getDoc } from 'firebase/firestore'
+import { db } from '../lib/firebase'
 
 function formatDate(iso) {
   if (!iso) return ''
@@ -21,20 +23,14 @@ const STAGE_EMOJI = {
 }
 
 const R32_TO_R16 = {
-  'm089': ['m074','m077'],
-  'm090': ['m073','m075'],
-  'm091': ['m076','m078'],
-  'm092': ['m079','m080'],
-  'm093': ['m083','m084'],
-  'm094': ['m081','m082'],
-  'm095': ['m086','m088'],
-  'm096': ['m085','m087'],
+  'm089': ['m074','m077'], 'm090': ['m073','m075'],
+  'm091': ['m076','m078'], 'm092': ['m079','m080'],
+  'm093': ['m083','m084'], 'm094': ['m081','m082'],
+  'm095': ['m086','m088'], 'm096': ['m085','m087'],
 }
 const R16_TO_QF = {
-  'm097': ['m089','m090'],
-  'm098': ['m093','m094'],
-  'm099': ['m091','m092'],
-  'm100': ['m095','m096'],
+  'm097': ['m089','m090'], 'm098': ['m093','m094'],
+  'm099': ['m091','m092'], 'm100': ['m095','m096'],
 }
 const QF_TO_SF = {
   'm101': ['m097','m098'], 'm102': ['m099','m100'],
@@ -53,6 +49,72 @@ function groupByStage(fixtures) {
     acc[key].push(f)
     return acc
   }, {})
+}
+
+// Calculate points earned from a single completed fixture
+function calcMatchPoints(fixture, pred, matchEvents, tournamentPred) {
+  if (!fixture?.completed || !pred) return { total: 0, breakdown: [] }
+  const breakdown = []
+  let total = 0
+
+  const h90 = Number(pred.score90Home)
+  const a90 = Number(pred.score90Away)
+  const actH90 = Number(fixture.score90Home)
+  const actA90 = Number(fixture.score90Away)
+
+  if (!isNaN(h90) && !isNaN(a90) && !isNaN(actH90) && !isNaN(actA90)) {
+    const predResult = h90 > a90 ? 'h' : a90 > h90 ? 'a' : 'd'
+    const actResult = actH90 > actA90 ? 'h' : actA90 > actH90 ? 'a' : 'd'
+    const correctScore = h90 === actH90 && a90 === actA90
+    if (correctScore) {
+      total += 6
+      breakdown.push('✓ Correct score +6')
+    } else if (predResult === actResult) {
+      total += 3
+      breakdown.push('✓ Correct result +3')
+    }
+  }
+
+  if (fixture.hasExtraTime && pred.scoreETHome !== undefined && pred.scoreETHome !== '') {
+    const hET = Number(pred.scoreETHome), aET = Number(pred.scoreETAway)
+    const actHET = Number(fixture.scoreAfterETHome), actAET = Number(fixture.scoreAfterETAway)
+    if (!isNaN(hET) && !isNaN(aET) && !isNaN(actHET) && !isNaN(actAET)) {
+      const predResET = hET > aET ? 'h' : aET > hET ? 'a' : 'd'
+      const actResET = actHET > actAET ? 'h' : actAET > actHET ? 'a' : 'd'
+      if (hET === actHET && aET === actAET) {
+        total += 4; breakdown.push('✓ Correct ET score +4')
+      } else if (predResET === actResET) {
+        total += 2; breakdown.push('✓ Correct ET result +2')
+      }
+    }
+  }
+
+  if (fixture.hasPenalties && pred.scorePenHome !== undefined && pred.scorePenHome !== '') {
+    const hPen = Number(pred.scorePenHome), aPen = Number(pred.scorePenAway)
+    const actHPen = Number(fixture.scorePenHome), actAPen = Number(fixture.scorePenAway)
+    if (!isNaN(hPen) && !isNaN(aPen) && !isNaN(actHPen) && !isNaN(actAPen)) {
+      const predPenW = hPen > aPen ? 'h' : 'a'
+      const actPenW = actHPen > actAPen ? 'h' : 'a'
+      if (hPen === actHPen && aPen === actAPen) {
+        total += 6; breakdown.push('✓ Correct shootout score +6')
+      } else if (predPenW === actPenW) {
+        total += 3; breakdown.push('✓ Correct shootout result +3')
+      }
+    }
+  }
+
+  if (matchEvents && tournamentPred) {
+    const namedScorers = (tournamentPred.namedScorers || []).filter(Boolean).map(n => n.toLowerCase())
+    const namedAssisters = (tournamentPred.namedAssisters || []).filter(Boolean).map(n => n.toLowerCase())
+    for (const scorer of (matchEvents.goalScorers || [])) {
+      if (namedScorers.includes(scorer.toLowerCase())) { total += 2; breakdown.push(`⚽ ${scorer} goal +2`) }
+    }
+    for (const assister of (matchEvents.assisters || [])) {
+      if (namedAssisters.includes(assister.toLowerCase())) { total += 1; breakdown.push(`🎯 ${assister} assist +1`) }
+    }
+  }
+
+  return { total, breakdown }
 }
 
 function NumInput({ value, onChange, disabled, large, min = 0 }) {
@@ -75,7 +137,7 @@ function NumInput({ value, onChange, disabled, large, min = 0 }) {
   )
 }
 
-function FixtureRow({ fixture, prediction, onSave, locked }) {
+function FixtureRow({ fixture, prediction, onSave, locked, matchEvents, tournamentPred }) {
   const isKnockout = fixture.isKnockout
   const isTBD = fixture.homeTeam === 'TBD' || fixture.awayTeam === 'TBD'
   const actual = fixture.completed
@@ -87,6 +149,7 @@ function FixtureRow({ fixture, prediction, onSave, locked }) {
   const [hPen, setHPen] = useState(prediction?.scorePenHome ?? '')
   const [aPen, setAPen] = useState(prediction?.scorePenAway ?? '')
   const [status, setStatus] = useState(null)
+  const [showBreakdown, setShowBreakdown] = useState(false)
   const saveTimer = useRef(null)
 
   const isDraw90 = h90 !== '' && a90 !== '' && Number(h90) === Number(a90)
@@ -129,6 +192,13 @@ function FixtureRow({ fixture, prediction, onSave, locked }) {
     ? `${fixture.score90Home}-${fixture.score90Away}${fixture.hasExtraTime ? ' (AET)' : ''}${fixture.hasPenalties ? ` (${fixture.scorePenHome}-${fixture.scorePenAway} pens)` : ''}`
     : null
 
+  // Points for this match
+  const { total: matchPoints, breakdown } = actual && prediction
+    ? calcMatchPoints(fixture, prediction, matchEvents, tournamentPred)
+    : { total: 0, breakdown: [] }
+
+  const hasPrediction = prediction && prediction.score90Home !== undefined && prediction.score90Home !== ''
+
   return (
     <div style={{
       background: isKnockout ? 'linear-gradient(135deg, rgba(245,200,66,0.07) 0%, var(--panel) 60%)' : 'var(--panel)',
@@ -143,6 +213,23 @@ function FixtureRow({ fixture, prediction, onSave, locked }) {
           {status === 'saving' && <span style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>saving...</span>}
           {status === 'saved' && <span style={{ fontSize: '0.7rem', color: 'var(--green)' }}>✓ saved</span>}
           {status === 'error' && <span style={{ fontSize: '0.7rem', color: 'var(--red)' }}>error</span>}
+          {actual && hasPrediction && (
+            <button
+              onClick={() => setShowBreakdown(b => !b)}
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontSize: '0.78rem',
+                padding: '0.2rem 0.6rem',
+                borderRadius: '999px',
+                border: `1px solid ${matchPoints > 0 ? 'var(--gold)' : 'var(--border)'}`,
+                background: matchPoints > 0 ? 'rgba(245,200,66,0.12)' : 'transparent',
+                color: matchPoints > 0 ? 'var(--gold)' : 'var(--muted)',
+                cursor: 'pointer',
+              }}
+            >
+              {matchPoints > 0 ? `+${matchPoints} pts` : '0 pts'}
+            </button>
+          )}
           {actual ? <span className="badge badge-green">FT</span>
             : locked ? <span className="badge badge-red">LOCKED</span>
             : isTBD ? <span className="badge badge-muted">TBD</span>
@@ -165,13 +252,18 @@ function FixtureRow({ fixture, prediction, onSave, locked }) {
         </div>
 
         {actual ? (
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: isKnockout ? '1.8rem' : '1.5rem', color: 'var(--gold)' }}>
-            {scoreStr}
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: isKnockout ? '1.8rem' : '1.5rem', color: 'var(--gold)' }}>
+              {scoreStr}
+            </div>
+            {hasPrediction && (
+              <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '0.15rem' }}>
+                Your pick: {prediction.score90Home}-{prediction.score90Away}
+              </div>
+            )}
           </div>
         ) : isTBD ? (
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '0.9rem', color: 'var(--muted)', textAlign: 'center' }}>
-            vs
-          </div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '0.9rem', color: 'var(--muted)', textAlign: 'center' }}>vs</div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <NumInput value={h90} onChange={setH90} disabled={locked} large={isKnockout} />
@@ -210,11 +302,33 @@ function FixtureRow({ fixture, prediction, onSave, locked }) {
         </div>
       )}
 
-      {prediction && !actual && !locked && !isTBD && (
-        <div style={{ marginTop: '0.4rem', textAlign: 'right', fontSize: '0.72rem', color: 'var(--muted)' }}>
-          Saved: {prediction.score90Home}-{prediction.score90Away}
-          {prediction.scoreETHome !== undefined ? ` · ET: ${prediction.scoreETHome}-${prediction.scoreETAway}` : ''}
-          {prediction.scorePenHome !== undefined ? ` · Pens: ${prediction.scorePenHome}-${prediction.scorePenAway}` : ''}
+      {/* Points breakdown panel */}
+      {showBreakdown && actual && hasPrediction && (
+        <div style={{
+          marginTop: '0.75rem', paddingTop: '0.75rem',
+          borderTop: '1px solid var(--border)',
+          fontSize: '0.78rem',
+        }}>
+          {breakdown.length > 0 ? (
+            breakdown.map((line, i) => (
+              <div key={i} style={{ color: 'var(--gold)', marginBottom: '0.2rem' }}>{line}</div>
+            ))
+          ) : (
+            <div style={{ color: 'var(--muted)' }}>No points from this match</div>
+          )}
+          {matchEvents && (matchEvents.goalScorers?.length > 0 || matchEvents.assisters?.length > 0) && (
+            <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border)', color: 'var(--muted)' }}>
+              {matchEvents.goalScorers?.length > 0 && (
+                <div>⚽ Goals: {matchEvents.goalScorers.join(', ')}</div>
+              )}
+              {matchEvents.assisters?.length > 0 && (
+                <div>🎯 Assists: {matchEvents.assisters.join(', ')}</div>
+              )}
+              {matchEvents.cleanSheetTeams?.length > 0 && (
+                <div>🧤 Clean sheet: {matchEvents.cleanSheetTeams.join(', ')}</div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -228,6 +342,8 @@ export default function Fixtures({ playerId }) {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
   const [stageFilter, setStageFilter] = useState('all')
+  const [matchEvents, setMatchEvents] = useState({})
+  const [tournamentPred, setTournamentPred] = useState(null)
 
   useEffect(() => { const unsub = subscribeFixtures(setFixturesArr); return unsub }, [])
 
@@ -238,9 +354,22 @@ export default function Fixtures({ playerId }) {
       preds.forEach(p => { map[p.fixtureId] = p })
       setPredictions(map)
     })
+    // Load tournament predictions for named player scoring
+    getDoc(doc(db, 'tournamentPredictions', playerId)).then(snap => {
+      if (snap.exists()) setTournamentPred(snap.data())
+    })
   }, [playerId])
 
   useEffect(() => { getDeadline().then(d => { setDeadline(d); setLoading(false) }) }, [])
+
+  // Load match events for completed fixtures
+  useEffect(() => {
+    getDocs(collection(db, 'matchEvents')).then(snap => {
+      const eventsMap = {}
+      snap.docs.forEach(d => { eventsMap[d.id] = d.data() })
+      setMatchEvents(eventsMap)
+    })
+  }, [])
 
   const now = new Date()
   const isLocked = deadline ? now > new Date(deadline) : false
@@ -321,11 +450,9 @@ export default function Fixtures({ playerId }) {
   })
 
   const allResolved = Object.values(resolvedTeams)
-
   const grouped = groupByStage(allResolved)
   const sortedStages = Object.keys(grouped).sort((a, b) => {
-    const ai = STAGE_ORDER.indexOf(a)
-    const bi = STAGE_ORDER.indexOf(b)
+    const ai = STAGE_ORDER.indexOf(a), bi = STAGE_ORDER.indexOf(b)
     return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
   })
 
@@ -341,20 +468,35 @@ export default function Fixtures({ playerId }) {
     return p && p.score90Home !== undefined && p.score90Home !== ''
   }).length
 
+  // Total points across all completed fixtures
+  const totalMatchPoints = Object.entries(predictions).reduce((sum, [fixtureId, pred]) => {
+    const fixture = fixturesMap[fixtureId]
+    if (!fixture?.completed) return sum
+    const { total } = calcMatchPoints(fixture, pred, matchEvents[fixtureId], tournamentPred)
+    return sum + total
+  }, 0)
+
   if (loading) return <div className="page"><div className="spinner" /></div>
 
   return (
     <div className="page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
         <h2>FIXTURES</h2>
-        {deadline && (
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Deadline</div>
-            <div style={{ fontSize: '0.82rem', color: isLocked ? 'var(--red)' : 'var(--gold)' }}>
-              {isLocked ? '🔒 Locked' : formatDate(deadline)}
+        <div style={{ textAlign: 'right' }}>
+          {deadline && (
+            <>
+              <div style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Deadline</div>
+              <div style={{ fontSize: '0.82rem', color: isLocked ? 'var(--red)' : 'var(--gold)' }}>
+                {isLocked ? '🔒 Locked' : formatDate(deadline)}
+              </div>
+            </>
+          )}
+          {totalMatchPoints > 0 && (
+            <div style={{ fontSize: '0.82rem', color: 'var(--gold)', fontFamily: 'var(--font-display)', marginTop: '0.2rem' }}>
+              {totalMatchPoints} pts from matches
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {!isLocked && (
@@ -420,7 +562,15 @@ export default function Fixtures({ playerId }) {
                 {STAGE_EMOJI[stage] && `${STAGE_EMOJI[stage]} `}{stage}
               </h3>
               {visible.map(f => (
-                <FixtureRow key={f.id} fixture={f} prediction={predictions[f.id]} onSave={handleSave} locked={isLocked || f.completed} />
+                <FixtureRow
+                  key={f.id}
+                  fixture={f}
+                  prediction={predictions[f.id]}
+                  onSave={handleSave}
+                  locked={isLocked || f.completed}
+                  matchEvents={matchEvents[f.id]}
+                  tournamentPred={tournamentPred}
+                />
               ))}
             </div>
           </div>
