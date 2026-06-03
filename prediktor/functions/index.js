@@ -221,13 +221,13 @@ exports.scoreAllPlayers = functions.https.onCall(async (data, context) => {
         const actResult = actH90 > actA90 ? 'h' : actA90 > actH90 ? 'a' : 'd'
 
         // 90 min result (3pts) + exact score bonus (3pts)
-        if (predResult === actResult) {
+        const correctScore90 = h90 === actH90 && a90 === actA90
+        if (correctScore90) {
+          total += 6
+          breakdown.push(`+6 correct score: ${h90}-${a90} (${fixture.homeTeam} v ${fixture.awayTeam})`)
+        } else if (predResult === actResult) {
           total += 3
           breakdown.push(`+3 correct result: ${fixture.homeTeam} v ${fixture.awayTeam}`)
-        }
-        if (h90 === actH90 && a90 === actA90) {
-          total += 3
-          breakdown.push(`+3 correct score: ${h90}-${a90}`)
         }
 
         // ET
@@ -238,8 +238,8 @@ exports.scoreAllPlayers = functions.https.onCall(async (data, context) => {
           const actAET = Number(fixture.scoreAfterETAway)
           const predResET = hET > aET ? 'h' : aET > hET ? 'a' : 'd'
           const actResET = actHET > actAET ? 'h' : actAET > actHET ? 'a' : 'd'
-          if (predResET === actResET) { total += 2; breakdown.push('+2 correct ET result') }
-          if (hET === actHET && aET === actAET) { total += 2; breakdown.push('+2 correct ET score') }
+          if (hET === actHET && aET === actAET) { total += 4; breakdown.push('+4 correct ET score') }
+          else if (predResET === actResET) { total += 2; breakdown.push('+2 correct ET result') }
         }
 
         // Penalties
@@ -250,8 +250,8 @@ exports.scoreAllPlayers = functions.https.onCall(async (data, context) => {
           const actAPen = Number(fixture.scorePenAway)
           const predPenW = hPen > aPen ? 'h' : 'a'
           const actPenW = actHPen > actAPen ? 'h' : 'a'
-          if (predPenW === actPenW) { total += 3; breakdown.push('+3 correct shootout result') }
-          if (hPen === actHPen && aPen === actAPen) { total += 3; breakdown.push('+3 correct shootout score') }
+          if (hPen === actHPen && aPen === actAPen) { total += 6; breakdown.push('+6 correct shootout score') }
+          else if (predPenW === actPenW) { total += 3; breakdown.push('+3 correct shootout result') }
         }
       }
 
