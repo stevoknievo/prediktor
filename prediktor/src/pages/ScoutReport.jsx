@@ -5,10 +5,11 @@ import { getFunctions, httpsCallable } from 'firebase/functions'
 import { db } from '../lib/firebase'
 
 async function getAllPredictions() {
-  const [playersSnap, matchPredsSnap, tournPredsSnap] = await Promise.all([
+  const [playersSnap, matchPredsSnap, tournPredsSnap, fixturesSnap] = await Promise.all([
     getDocs(collection(db, 'players')),
     getDocs(collection(db, 'predictions')),
     getDocs(collection(db, 'tournamentPredictions')),
+    getDocs(collection(db, 'fixtures')),
   ])
   const players = {}
   playersSnap.docs.forEach(d => { players[d.id] = d.data() })
@@ -20,14 +21,17 @@ async function getAllPredictions() {
   })
   const tournPreds = {}
   tournPredsSnap.docs.forEach(d => { tournPreds[d.id] = d.data() })
-  return { players, matchPreds, tournPreds }
+  const fixtures = {}
+  fixturesSnap.docs.forEach(d => { fixtures[d.id] = d.data() })
+  return { players, matchPreds, tournPreds, fixtures }
 }
 
-function buildPrompt(playerId, nickname, allData, odds) {
-  const { players, matchPreds, tournPreds } = allData
+function buildPrompt(playerId, nickname, allData) {
+  const { players, matchPreds, tournPreds, fixtures } = allData
   const myTournPred = tournPreds[playerId] || {}
   const myMatchPreds = matchPreds[playerId] || {}
 
+  // ── Rivals summary ──────────────────────────────────────────────────────
   const rivals = Object.values(players)
     .filter(p => p.id !== playerId)
     .map(p => ({
@@ -42,26 +46,85 @@ function buildPrompt(playerId, nickname, allData, odds) {
     }
   })
 
-  const boldPicks = Object.values(myMatchPreds)
-    .filter(p => p.score90Home !== undefined && p.score90Away !== undefined)
-    .map(p => ({
-      fixtureId: p.fixtureId,
-      home: p.score90Home,
-      away: p.score90Away,
-      total: Number(p.score90Home) + Number(p.score90Away),
-      diff: Math.abs(Number(p.score90Home) - Number(p.score90Away))
-    }))
-    .sort((a, b) => (b.total + b.diff) - (a.total + a.diff))
-    .slice(0, 5)
+  // ── Fixture analysis ────────────────────────────────────────────────────
+  const allPredsList = Object.entries(myMatchPreds)
+    .filter(([, p]) => p.score90Home !== undefined && p.score90Home !== '')
+    .map(([fixtureId, p]) => {
+      const fixture = fixtures[fixtureId] || {}
+      const h = Number(p.score90Home)
+      const a = Number(p.score90Away)
+      return {
+        fixtureId,
+        home: h, away: a,
+        homeTeam: fixture.homeTeam || fixtureId,
+        awayTeam: fixture.awayTeam || fixtureId,
+        stage: fixture.stage || 'Group',
+        isKnockout: fixture.isKnockout || false,
+        total: h + a,
+        diff: Math.abs(h - a),
+        result: h > a ? 'home' : a > h ? 'away' : 'draw',
+      }
+    })
 
-  const totalPredicted = Object.keys(myMatchPreds).length
+  const totalPredicted = allPredsList.length
+  const groupPreds = allPredsList.filter(p => !p.isKnockout)
+  const knockoutPreds = allPredsList.filter(p => p.isKnockout)
 
-  return `You are a witty, knowledgeable football pundit writing a personal "scout report" for a World Cup 2026 prediction game called The Prediktor. Your tone is like a funny, well-informed mate — gently teasing, warm, never cruel. Use British English. Keep the report to around 350-400 words.
+  // Scoring tendencies
+  const avgGoals = groupPreds.length
+    ? (groupPreds.reduce((s, p) => s + p.total, 0) / groupPreds.length).toFixed(1)
+    : 'n/a'
+  const drawCount = groupPreds.filter(p => p.result === 'draw').length
+  const drawPct = groupPreds.length ? Math.round((drawCount / groupPreds.length) * 100) : 0
+
+  // Upsets — group stage big wins (diff >= 3)
+  const bigWins = groupPreds
+    .filter(p => p.diff >= 3)
+    .sort((a, b) => b.diff - a.diff)
+    .slice(0, 3)
+    .map(p => `${p.homeTeam} ${p.home}-${p.away} ${p.awayTeam}`)
+
+  // High scoring predictions (total >= 5)
+  const highScorers = groupPreds
+    .filter(p => p.total >= 5)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 3)
+    .map(p => `${p.homeTeam} ${p.home}-${p.away} ${p.awayTeam}`)
+
+  // Boring predictions (0-0 or 1-0 or 0-1)
+  const boringPreds = groupPreds
+    .filter(p => p.total <= 1)
+    .slice(0, 3)
+    .map(p => `${p.homeTeam} ${p.home}-${p.away} ${p.awayTeam}`)
+
+  // Knockout predictions
+  const knockoutSummary = knockoutPreds
+    .slice(0, 6)
+    .map(p => `${p.homeTeam} ${p.home}-${p.away} ${p.awayTeam} (${p.stage})`)
+
+  // Compare with rivals — are their group picks contrarian?
+  const rivalMatchPreds = matchPreds
+  const contrarianPicks = []
+  for (const pred of groupPreds.slice(0, 20)) {
+    const rivalResults = Object.entries(rivalMatchPreds)
+      .filter(([pid]) => pid !== playerId)
+      .map(([, preds]) => preds[pred.fixtureId])
+      .filter(Boolean)
+      .map(p => Number(p.score90Home) > Number(p.score90Away) ? 'home' : Number(p.score90Away) > Number(p.score90Home) ? 'away' : 'draw')
+    if (rivalResults.length >= 2) {
+      const rivalMajority = rivalResults.filter(r => r === rivalResults[0]).length / rivalResults.length
+      if (rivalMajority >= 0.7 && pred.result !== rivalResults[0]) {
+        contrarianPicks.push(`${pred.homeTeam} vs ${pred.awayTeam} (you picked ${pred.result === 'home' ? pred.homeTeam : pred.result === 'away' ? pred.awayTeam : 'a draw'}, most rivals disagree)`)
+      }
+    }
+  }
+
+  return `You are a witty, knowledgeable football pundit writing a personal "scout report" for a World Cup 2026 prediction game called The Prediktor. Your tone is like a funny, well-informed mate — gently teasing, warm, never cruel. Use British English. Keep the report to around 400 words.
 
 The player you're writing about is: ${nickname}
 
-THEIR TOURNAMENT PREDICTIONS:
-- Tournament winner pick: ${myTournPred.tournamentWinner || 'not submitted yet'}
+THEIR TOURNAMENT PREDICTIONS (My Picks tab):
+- Tournament winner: ${myTournPred.tournamentWinner || 'not submitted yet'}
 - Named goal scorers: ${(myTournPred.namedScorers || []).filter(Boolean).join(', ') || 'none yet'}
 - Named assisters: ${(myTournPred.namedAssisters || []).filter(Boolean).join(', ') || 'none yet'}
 - Named goalkeepers: ${(myTournPred.namedGoalies || []).filter(Boolean).join(', ') || 'none yet'}
@@ -71,13 +134,17 @@ THEIR TOURNAMENT PREDICTIONS:
 - Most yellow card team: ${myTournPred.mostYellowCardTeam || 'not submitted'}
 - Fewest yellow card team: ${myTournPred.fewestYellowCardTeam || 'not submitted'}
 
-MATCH PREDICTIONS SUBMITTED: ${totalPredicted} out of 104 total fixtures
-
-THEIR BOLDEST MATCH PREDICTIONS (highest scoring/most decisive):
-${boldPicks.map(p => `Fixture ${p.fixtureId}: ${p.home}-${p.away}`).join('\n') || 'None yet'}
-
-BOOKMAKER ODDS FOR TOURNAMENT WINNER (decimal):
-To be provided by the server
+THEIR FIXTURE PREDICTIONS (scoring strategy):
+- Total fixtures predicted: ${totalPredicted} of 104
+- Group stage predictions: ${groupPreds.length} of 72
+- Knockout predictions: ${knockoutPreds.length} of 32
+- Average goals per group match predicted: ${avgGoals}
+- Percentage of group games predicted as draws: ${drawPct}%
+${highScorers.length > 0 ? `- High-scoring predictions (5+ goals): ${highScorers.join(' | ')}` : ''}
+${bigWins.length > 0 ? `- Biggest predicted wins (3+ goal margins): ${bigWins.join(' | ')}` : ''}
+${boringPreds.length > 0 ? `- Most conservative predictions: ${boringPreds.join(' | ')}` : ''}
+${knockoutSummary.length > 0 ? `- Knockout predictions: ${knockoutSummary.join(' | ')}` : ''}
+${contrarianPicks.length > 0 ? `- Going against the crowd: ${contrarianPicks.slice(0, 2).join(' | ')}` : ''}
 
 HOW MANY OTHERS PICKED THE SAME WINNER:
 ${myTournPred.tournamentWinner ? `${winnerPickCounts[myTournPred.tournamentWinner] || 0} player(s) also picked ${myTournPred.tournamentWinner}` : 'No winner picked yet'}
@@ -85,17 +152,19 @@ ${myTournPred.tournamentWinner ? `${winnerPickCounts[myTournPred.tournamentWinne
 RIVALS' WINNER PICKS:
 ${rivals.slice(0, 8).map(r => `${r.nickname}: ${r.tournamentWinner}`).join(', ')}
 
+BOOKMAKER ODDS FOR TOURNAMENT WINNER (decimal):
+To be provided by the server
+
 Write a personalised scout report for ${nickname} covering:
-1. A punchy opening line summing up their overall approach
-2. Analysis of their tournament winner pick — are they with the crowd, against the grain, or just plain brave/mad?
-3. Comment on their named player picks — any gems, any eyebrow-raisers?
-4. If they have bold match predictions, mention one or two specifically
-5. A "boldness rating" at the end — give them a fun nickname like "Safe Hands Steve", "The Dark Horse Hunter", "Captain Chaos" etc based on how bold or conservative their picks are overall
-6. A one-line prediction of where they'll finish in the leaderboard
+1. A punchy opening line summing up their overall prediction style
+2. Analysis of their tournament winner pick — crowd favourite or against the grain?
+3. Comment on their fixture predictions — are they an attacking optimist (high scores), a pragmatist (draws and tight games), or a chaos merchant (huge margins)? Mention specific predictions if interesting
+4. Comment on their named player picks — any gems, any eyebrow-raisers?
+5. Note if they're going against their rivals on any picks — contrarian boldness or stubborn foolishness?
+6. A "boldness rating" — give them a fun pundit nickname like "Safe Hands Steve", "The Dark Horse Hunter", "Captain Chaos", "The Spreadsheet Merchant" etc
+7. A one-line prediction of where they'll finish in the leaderboard
 
-If they haven't submitted many predictions yet, gently encourage them to get on with it while still being funny about what they HAVE submitted.
-
-Do not use markdown headers or bullet points — write it as flowing prose paragraphs.`
+If they haven't submitted many predictions yet, gently rib them about it while still being funny about what they HAVE submitted. Do not use markdown headers or bullet points — write it as flowing prose paragraphs.`
 }
 
 export default function ScoutReport({ playerId, nickname }) {
@@ -121,12 +190,10 @@ export default function ScoutReport({ playerId, nickname }) {
     setError('')
     try {
       const functions = getFunctions()
-      const getTournamentOdds = httpsCallable(functions, 'getTournamentOdds')
       const generateScoutReportFn = httpsCallable(functions, 'generateScoutReport')
 
-      // Fetch data in parallel
       const allData = await getAllPredictions()
-      const prompt = buildPrompt(playerId, nickname, allData, null)
+      const prompt = buildPrompt(playerId, nickname, allData)
 
       const result = await generateScoutReportFn({ prompt })
 
