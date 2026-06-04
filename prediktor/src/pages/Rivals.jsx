@@ -2,6 +2,68 @@
 import { useState, useEffect } from 'react'
 import { collection, getDocs, doc, getDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
+import { generateRoundOf32, getKnockoutWinner } from '../lib/qualification'
+
+const R32_TO_R16 = {
+  'm089': ['m074','m077'], 'm090': ['m073','m075'],
+  'm091': ['m076','m078'], 'm092': ['m079','m080'],
+  'm093': ['m083','m084'], 'm094': ['m081','m082'],
+  'm095': ['m086','m088'], 'm096': ['m085','m087'],
+}
+const R16_TO_QF = {
+  'm097': ['m089','m090'], 'm098': ['m093','m094'],
+  'm099': ['m091','m092'], 'm100': ['m095','m096'],
+}
+const QF_TO_SF = {
+  'm101': ['m097','m098'], 'm102': ['m099','m100'],
+}
+const SF_TO_FINAL = { 'm104': ['m101','m102'] }
+const SF_TO_3RD = { 'm103': ['m101','m102'] }
+
+function resolveKnockoutTeams(fixturesMap, predictions) {
+  const resolved = { ...fixturesMap }
+
+  function getWinner(fid) {
+    const pred = predictions[fid]
+    const fixture = resolved[fid]
+    if (!pred || !fixture || fixture.homeTeam === 'TBD' || fixture.awayTeam === 'TBD') return null
+    return getKnockoutWinner(pred, fixture)
+  }
+
+  function getLoser(fid) {
+    const pred = predictions[fid]
+    const fixture = resolved[fid]
+    if (!pred || !fixture || fixture.homeTeam === 'TBD' || fixture.awayTeam === 'TBD') return null
+    const w = getKnockoutWinner(pred, fixture)
+    if (!w) return null
+    return w === fixture.homeTeam ? fixture.awayTeam : fixture.homeTeam
+  }
+
+  try {
+    const r32 = generateRoundOf32(fixturesMap, predictions)
+    r32.forEach(r => {
+      if (resolved[r.id]) resolved[r.id] = { ...resolved[r.id], homeTeam: r.homeTeam, awayTeam: r.awayTeam }
+    })
+  } catch (e) {}
+
+  Object.entries(R32_TO_R16).forEach(([id, [f1, f2]]) => {
+    if (resolved[id]) resolved[id] = { ...resolved[id], homeTeam: getWinner(f1) || 'TBD', awayTeam: getWinner(f2) || 'TBD' }
+  })
+  Object.entries(R16_TO_QF).forEach(([id, [f1, f2]]) => {
+    if (resolved[id]) resolved[id] = { ...resolved[id], homeTeam: getWinner(f1) || 'TBD', awayTeam: getWinner(f2) || 'TBD' }
+  })
+  Object.entries(QF_TO_SF).forEach(([id, [f1, f2]]) => {
+    if (resolved[id]) resolved[id] = { ...resolved[id], homeTeam: getWinner(f1) || 'TBD', awayTeam: getWinner(f2) || 'TBD' }
+  })
+  Object.entries(SF_TO_FINAL).forEach(([id, [f1, f2]]) => {
+    if (resolved[id]) resolved[id] = { ...resolved[id], homeTeam: getWinner(f1) || 'TBD', awayTeam: getWinner(f2) || 'TBD' }
+  })
+  Object.entries(SF_TO_3RD).forEach(([id, [f1, f2]]) => {
+    if (resolved[id]) resolved[id] = { ...resolved[id], homeTeam: getLoser(f1) || 'TBD', awayTeam: getLoser(f2) || 'TBD' }
+  })
+
+  return resolved
+}
 
 async function getAllTournamentPredictions() {
   const [playersSnap, predsSnap] = await Promise.all([
@@ -51,7 +113,8 @@ function calcMatchPoints(fixture, pred) {
 
 // Modal showing all fixture predictions for a player
 function FixturePredictionsModal({ nickname, playerId, onClose, fixtures }) {
-  const [predictions, setPredictions] = useState([])
+  const [predictions, setPredictions] = useState({})
+  const [resolvedFixtures, setResolvedFixtures] = useState(fixtures)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -62,6 +125,7 @@ function FixturePredictionsModal({ nickname, playerId, onClose, fixtures }) {
         if (p.playerId === playerId) preds[p.fixtureId] = p
       })
       setPredictions(preds)
+      setResolvedFixtures(resolveKnockoutTeams(fixtures, preds))
       setLoading(false)
     })
   }, [playerId])
@@ -72,7 +136,7 @@ function FixturePredictionsModal({ nickname, playerId, onClose, fixtures }) {
     'Round of 32','Round of 16','Quarter-final','Semi-final','3rd Place Final','Final'
   ]
 
-  const fixturesList = Object.values(fixtures)
+  const fixturesList = Object.values(resolvedFixtures)
     .filter(f => predictions[f.id])
     .sort((a, b) => {
       const ai = STAGE_ORDER.indexOf(a.stage), bi = STAGE_ORDER.indexOf(b.stage)
