@@ -167,12 +167,120 @@ Write a personalised scout report for ${nickname} covering:
 If they haven't submitted many predictions yet, gently rib them about it while still being funny about what they HAVE submitted. Do not use markdown headers or bullet points — write it as flowing prose paragraphs.`
 }
 
+// ── Leaderboard prediction prompt ─────────────────────────────────────────
+
+function buildLeaderboardPrompt(allData, odds) {
+  const { players, matchPreds, tournPreds, fixtures } = allData
+
+  // For each player, calculate expected points based on prediction patterns
+  const playerSummaries = Object.values(players).map(player => {
+    const pid = player.id
+    const myMatchPreds = matchPreds[pid] || {}
+    const myTournPred = tournPreds[pid] || {}
+
+    const preds = Object.entries(myMatchPreds)
+      .filter(([, p]) => p.score90Home !== undefined && p.score90Home !== '')
+      .map(([fixtureId, p]) => {
+        const fixture = fixtures[fixtureId] || {}
+        return {
+          homeTeam: fixture.homeTeam || fixtureId,
+          awayTeam: fixture.awayTeam || fixtureId,
+          home: Number(p.score90Home),
+          away: Number(p.score90Away),
+          stage: fixture.stage || 'Group',
+          isKnockout: fixture.isKnockout || false,
+        }
+      })
+
+    const avgGoals = preds.length
+      ? (preds.reduce((s, p) => s + p.home + p.away, 0) / preds.length).toFixed(1)
+      : 0
+    const draws = preds.filter(p => p.home === p.away).length
+    const bigWins = preds.filter(p => Math.abs(p.home - p.away) >= 3).length
+
+    // Boldness score: high scoring + big margins = bold
+    const boldness = preds.length > 0
+      ? ((Number(avgGoals) - 2.5) * 10 + bigWins * 5 + (preds.length / 10)).toFixed(0)
+      : 0
+
+    return {
+      nickname: player.nickname,
+      totalCurrentPoints: player.totalPoints || 0,
+      predictedCount: preds.length,
+      winner: myTournPred.tournamentWinner || 'no pick',
+      namedScorers: (myTournPred.namedScorers || []).filter(Boolean).join(', ') || 'none',
+      avgGoals,
+      draws,
+      bigWins,
+      boldness: Number(boldness),
+    }
+  }).sort((a, b) => b.totalCurrentPoints - a.totalCurrentPoints)
+
+  const oddsText = odds || 'Use your general football knowledge for probabilities'
+  const totalPlayers = playerSummaries.length
+
+  return `You are a football statistics analyst and pundit for a World Cup 2026 prediction game called The Prediktor. The prediction deadline has now passed — all picks are locked in. Your job is to produce a probabilistic final leaderboard forecast.
+
+CURRENT STANDINGS (before tournament starts):
+${playerSummaries.map((p, i) => `${i + 1}. ${p.nickname} — ${p.totalCurrentPoints} pts`).join('\n')}
+
+PLAYER PROFILES:
+${playerSummaries.map(p => `
+${p.nickname}:
+- Tournament winner pick: ${p.winner}
+- Named scorers: ${p.namedScorers}
+- Fixtures predicted: ${p.predictedCount}/104
+- Average goals predicted per match: ${p.avgGoals}
+- Predicted draws: ${p.draws}
+- Predicted 3+ goal margin wins: ${p.bigWins}
+- Boldness index: ${p.boldness} (higher = more adventurous picks)`).join('\n')}
+
+BOOKMAKER TOURNAMENT WINNER ODDS (decimal):
+${oddsText}
+
+SCORING SYSTEM REMINDER:
+- Correct score: 6pts, Correct result: 3pts
+- Named scorer goal: 2pts, Named assister assist: 1pt, Named GK clean sheet: 3pts
+- Tournament winner: 15pts, Golden Boot: 15/10pts, Top assists: 10/5pts, Most clean sheets GK: 15/10pts
+- Card predictions: various bonus points
+
+TASK: Write a compelling 500-word probabilistic leaderboard forecast covering:
+
+1. Open with a punchy paragraph about who looks strongest going into the tournament based on their picks aligning with bookmaker expectations
+
+2. For each player, give a one-line probabilistic assessment of their chances — be specific about WHY (e.g. "backed Spain at 4.5 odds which gives them a 22% chance of the 15pt jackpot", or "named Erling Haaland as a scorer which gives them strong ongoing point potential")
+
+3. Predict the final top 3 with reasoning — who has the best mix of safe points (likely correct results) and upside potential (bold picks that could pay off)?
+
+4. Identify the biggest wildcard — who could rocket up the table if one of their bold picks comes true?
+
+5. End with a verdict on who you'd put your house on to win
+
+Use British English. Be analytical but entertaining — this is a pub quiz, not a boardroom presentation. Write in flowing prose, no bullet points or headers.`
+}
+
 export default function ScoutReport({ playerId, nickname }) {
   const [report, setReport] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [cached, setCached] = useState(false)
   const [lastGenerated, setLastGenerated] = useState(null)
+  const [leaderboardForecast, setLeaderboardForecast] = useState(null)
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false)
+  const [leaderboardError, setLeaderboardError] = useState('')
+  const [deadline, setDeadline] = useState(null)
+
+  useEffect(() => {
+    Promise.all([
+      getDoc(doc(db, 'meta', 'config')),
+      getDoc(doc(db, 'meta', 'leaderboardForecast')),
+    ]).then(([configSnap, forecastSnap]) => {
+      if (configSnap.exists()) setDeadline(configSnap.data().deadline)
+      if (forecastSnap.exists()) setLeaderboardForecast(forecastSnap.data().forecast)
+    })
+  }, [])
+
+  const isPastDeadline = deadline ? new Date() > new Date(deadline) : false
 
   useEffect(() => {
     if (!playerId) return
@@ -217,6 +325,39 @@ export default function ScoutReport({ playerId, nickname }) {
       setError(`Could not generate report: ${err.message}`)
     }
     setLoading(false)
+  }
+
+  async function handleLeaderboardForecast() {
+    setLeaderboardLoading(true)
+    setLeaderboardError('')
+    try {
+      const functions = getFunctions()
+      const generateScoutReportFn = httpsCallable(functions, 'generateScoutReport')
+      const allData = await getAllPredictions()
+
+      // Get odds via cloud function
+      const getTournamentOddsFn = httpsCallable(functions, 'getTournamentOdds')
+      const oddsResult = await getTournamentOddsFn().catch(() => ({ data: { odds: null } }))
+      const odds = oddsResult?.data?.odds
+        ? Object.entries(oddsResult.data.odds).slice(0, 16).map(([t, o]) => `${t}: ${o}`).join(', ')
+        : null
+
+      const prompt = buildLeaderboardPrompt(allData, odds)
+      const result = await generateScoutReportFn({ prompt })
+
+      if (!result.data.success) throw new Error(result.data.error || 'Unknown error')
+
+      const text = result.data.report
+      setLeaderboardForecast(text)
+      await setDoc(doc(db, 'meta', 'leaderboardForecast'), {
+        forecast: text,
+        generatedAt: serverTimestamp(),
+      })
+    } catch (err) {
+      console.error('Leaderboard forecast error:', err)
+      setLeaderboardError(`Could not generate forecast: ${err.message}`)
+    }
+    setLeaderboardLoading(false)
   }
 
   return (
@@ -280,6 +421,67 @@ export default function ScoutReport({ playerId, nickname }) {
           <p style={{ fontSize: '0.72rem', color: 'var(--muted)', textAlign: 'center', marginTop: '0.5rem' }}>
             Regenerating fetches fresh odds and latest predictions from all players
           </p>
+        </div>
+      )}
+
+      {/* Leaderboard Forecast — only shown after deadline */}
+      {isPastDeadline && (
+        <div style={{ marginTop: '2rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <span style={{ fontSize: '1.5rem' }}>🔮</span>
+            <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', color: 'var(--gold)' }}>
+              FINAL STANDINGS FORECAST
+            </h3>
+          </div>
+          <p style={{ fontSize: '0.82rem', color: 'var(--muted)', marginBottom: '1.25rem' }}>
+            Predictions are locked. Our AI analyst has studied everyone's picks and the bookmaker odds to project where each player will finish.
+          </p>
+
+          {!leaderboardForecast && !leaderboardLoading && (
+            <div className="card" style={{ textAlign: 'center', padding: '1.5rem' }}>
+              <p style={{ fontSize: '0.88rem', marginBottom: '1rem' }}>
+                Generate a probabilistic forecast of the final leaderboard based on all players' locked predictions and live bookmaker odds.
+              </p>
+              <button className="btn btn-primary" onClick={handleLeaderboardForecast}>
+                🔮 Generate Forecast
+              </button>
+            </div>
+          )}
+
+          {leaderboardLoading && (
+            <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
+              <div className="spinner" />
+              <p style={{ marginTop: '1rem', fontSize: '0.88rem' }}>Crunching the numbers...</p>
+            </div>
+          )}
+
+          {leaderboardError && (
+            <div className="card" style={{ borderColor: 'var(--red)', marginBottom: '1rem' }}>
+              <p style={{ color: 'var(--red)', fontSize: '0.88rem' }}>{leaderboardError}</p>
+            </div>
+          )}
+
+          {leaderboardForecast && !leaderboardLoading && (
+            <div>
+              <div className="card" style={{
+                marginBottom: '1rem',
+                background: 'linear-gradient(135deg, rgba(99,102,241,0.08) 0%, var(--panel) 100%)',
+                borderColor: 'rgba(99,102,241,0.25)'
+              }}>
+                <div style={{ fontSize: '0.92rem', lineHeight: 1.75, color: 'rgba(240,244,255,0.9)' }}>
+                  {leaderboardForecast.split('\n\n').map((para, i) => (
+                    <p key={i} style={{ marginBottom: '1rem' }}>{para}</p>
+                  ))}
+                </div>
+              </div>
+              <button className="btn btn-ghost w-full" onClick={handleLeaderboardForecast} style={{ fontSize: '0.9rem' }}>
+                🔄 Refresh Forecast
+              </button>
+              <p style={{ fontSize: '0.72rem', color: 'var(--muted)', textAlign: 'center', marginTop: '0.5rem' }}>
+                Forecast updates as matches are played and points accumulate
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>
