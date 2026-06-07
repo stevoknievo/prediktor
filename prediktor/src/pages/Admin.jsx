@@ -1,9 +1,9 @@
 // src/pages/Admin.jsx
 import { useState, useEffect } from 'react'
 import { getFunctions, httpsCallable } from 'firebase/functions'
-import { saveConfig, getTournamentOutcomes, saveTournamentOutcomes, getDeadline } from '../lib/db'
+import { saveConfig, getTournamentOutcomes, saveTournamentOutcomes } from '../lib/db'
 import { db } from '../lib/firebase'
-import { collection, getDocs, deleteDoc, doc } from 'firebase/firestore'
+import { collection, getDocs, deleteDoc, doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore'
 
 const ADMIN_PASS = import.meta.env.VITE_ADMIN_PASS || 'prediktor2026'
 
@@ -21,25 +21,9 @@ function PlayerManager({ addLog }) {
   async function deletePlayer(player) {
     if (!confirm(`Delete ${player.nickname}? This cannot be undone.`)) return
     try {
-      const { getDocs, query, where } = await import('firebase/firestore')
-
-      // Delete player doc
       await deleteDoc(doc(db, 'players', player.id))
-
-      // Delete tournament prediction
-      await deleteDoc(doc(db, 'tournamentPredictions', player.id))
-
-      // Delete scout report
-      await deleteDoc(doc(db, 'scoutReports', player.id))
-
-      // Delete all match predictions
-      const predsSnap = await getDocs(
-        query(collection(db, 'predictions'), where('playerId', '==', player.id))
-      )
-      for (const d of predsSnap.docs) await deleteDoc(d.ref)
-
       setPlayers(prev => prev.filter(p => p.id !== player.id))
-      addLog(`✓ Deleted ${player.nickname} and all their data`, 'success')
+      addLog(`✓ Deleted player: ${player.nickname}`, 'success')
     } catch (err) {
       addLog(`✗ Error deleting player: ${err.message}`, 'error')
     }
@@ -74,13 +58,77 @@ function PlayerManager({ addLog }) {
   )
 }
 
+
+function BroadcastComposer({ addLog }) {
+  const [title, setTitle] = useState('')
+  const [message, setMessage] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [current, setCurrent] = useState(null)
+
+  useEffect(() => {
+    getDoc(doc(db, 'meta', 'broadcast')).then(snap => {
+      if (snap.exists() && snap.data().active) setCurrent(snap.data())
+    })
+  }, [])
+
+  async function handlePost() {
+    if (!message.trim()) return
+    setSaving(true)
+    const id = Date.now().toString()
+    await setDoc(doc(db, 'meta', 'broadcast'), {
+      id, title: title.trim() || 'Message from the Admin',
+      message: message.trim(), active: true,
+      postedAt: serverTimestamp(),
+    })
+    setCurrent({ id, title, message, active: true })
+    addLog('✓ Broadcast message posted', 'success')
+    setSaving(false)
+  }
+
+  async function handleClear() {
+    await setDoc(doc(db, 'meta', 'broadcast'), { active: false })
+    setCurrent(null)
+    addLog('✓ Broadcast message cleared', 'success')
+  }
+
+  return (
+    <div>
+      {current && (
+        <div style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, padding: '0.75rem', marginBottom: '0.75rem', fontSize: '0.85rem' }}>
+          <div style={{ color: 'rgba(99,102,241,0.9)', fontWeight: 600, marginBottom: '0.25rem' }}>Active: {current.title}</div>
+          <div style={{ color: 'var(--muted)' }}>{current.message}</div>
+          <button className="btn btn-danger" style={{ marginTop: '0.5rem', fontSize: '0.78rem', padding: '0.3rem 0.75rem' }} onClick={handleClear}>
+            Clear Message
+          </button>
+        </div>
+      )}
+      <input
+        type="text"
+        placeholder="Title (optional, e.g. 'Deadline reminder')"
+        value={title}
+        onChange={e => setTitle(e.target.value)}
+        style={{ marginBottom: '0.5rem' }}
+      />
+      <textarea
+        placeholder="Your message to all players..."
+        value={message}
+        onChange={e => setMessage(e.target.value)}
+        rows={3}
+        style={{ width: '100%', resize: 'vertical', marginBottom: '0.75rem', padding: '0.6rem', background: 'var(--panel2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--white)', fontSize: '0.88rem' }}
+      />
+      <button className="btn btn-primary" onClick={handlePost} disabled={saving || !message.trim()}>
+        {saving ? 'Posting...' : '📣 Post to All Players'}
+      </button>
+    </div>
+  )
+}
+
 export default function Admin() {
   const [authed, setAuthed] = useState(false)
   const [pass, setPass] = useState('')
   const [log, setLog] = useState([])
   const [loading, setLoading] = useState(false)
   const [deadline, setDeadline] = useState('')
-  const [deadlineLoaded, setDeadlineLoaded] = useState(false)
   const [outcomes, setOutcomes] = useState({
     winner: '', topScorer: '', topAssister: '', topCleanSheet: '',
     totalRedCards: '', mostRedCardTeam: '', totalYellowCards: '',
@@ -91,16 +139,6 @@ export default function Admin() {
     if (authed) {
       getTournamentOutcomes().then(o => {
         if (o) setOutcomes(prev => ({ ...prev, ...o }))
-      })
-      getDeadline().then(d => {
-        if (d) {
-          // Convert ISO string to datetime-local format
-          const dt = new Date(d)
-          const local = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000)
-            .toISOString().slice(0, 16)
-          setDeadline(local)
-          setDeadlineLoaded(true)
-        }
       })
     }
   }, [authed])
@@ -231,6 +269,15 @@ export default function Admin() {
           </div>
         ))}
         <button className="btn btn-primary" style={{ marginTop: '0.5rem' }} onClick={saveOutcomes}>Save Outcomes</button>
+      </div>
+
+
+      <div className="card" style={{ marginBottom: '1rem' }}>
+        <h3 style={{ marginBottom: '0.5rem' }}>📣 BROADCAST MESSAGE</h3>
+        <p style={{ fontSize: '0.82rem', marginBottom: '1rem' }}>
+          Post a message that appears as a banner for all players. Tap × to dismiss on their end.
+        </p>
+        <BroadcastComposer addLog={addLog} />
       </div>
 
       {log.length > 0 && (
