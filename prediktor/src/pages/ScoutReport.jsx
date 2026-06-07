@@ -240,8 +240,8 @@ ${oddsText}
 
 SCORING SYSTEM REMINDER:
 - Correct score: 6pts, Correct result: 3pts
-- Named scorer goal: 2pts, Named assister assist: 1pt, Named GK clean sheet: 3pts
-- Tournament winner: 15pts, Golden Boot: 15/10pts, Top assists: 10/5pts, Most clean sheets GK: 15/10pts
+- Named scorer goal: 2pts, Named assister assist: 2pt, Named GK clean sheet: 3pts
+- Tournament winner: 15pts, Golden Boot: 15/10pts, Top assists: 15/10pts, Most clean sheets GK: 15/10pts
 - Card predictions: various bonus points
 
 TASK: Write a compelling 500-word probabilistic leaderboard forecast covering:
