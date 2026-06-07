@@ -234,7 +234,7 @@ export default function Tournament({ playerId }) {
 
         <NamedPlayerSection
           label="3 ASSISTERS"
-          hint="1pt per assist · 10pts most assists (outright) · 5pts joint"
+          hint="2pt per assist · 15pts most assists (outright) · 10pts joint"
           badge="1pt/assist"
           names={data.namedAssisters}
           onChange={v => setData(d => ({ ...d, namedAssisters: v }))}
