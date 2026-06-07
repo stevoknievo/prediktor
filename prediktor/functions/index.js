@@ -268,11 +268,11 @@ exports.scoreAllPlayers = functions.https.onCall(async (data, context) => {
             breakdown.push(`+2 goal: ${scorer}`)
           }
         }
-        // Assists — 1pt each
+        // Assists — 2pt each
         for (const assister of (events.assisters || [])) {
           if (namedAssisters.some(n => n.toLowerCase() === assister.toLowerCase())) {
-            total += 1
-            breakdown.push(`+1 assist: ${assister}`)
+            total += 2
+            breakdown.push(`+2 assist: ${assister}`)
           }
         }
         // Clean sheets — 3pts each (GK must be in named goalies and their team kept clean sheet)
@@ -342,7 +342,7 @@ exports.scoreAllPlayers = functions.https.onCall(async (data, context) => {
         const outright = topAssisters.length === 1
         for (const assister of namedAssisters) {
           if (topAssisters.includes(assister.toLowerCase())) {
-            const pts = outright ? 10 : 5
+            const pts = outright ? 15 : 10
             total += pts
             breakdown.push(`+${pts} Most assists: ${assister}`)
           }
@@ -364,7 +364,7 @@ exports.scoreAllPlayers = functions.https.onCall(async (data, context) => {
 
       // Red card predictions
       if (outcomes.totalRedCards !== undefined && tournPred.totalRedCards !== undefined) {
-        if (Math.abs(Number(tournPred.totalRedCards) - Number(outcomes.totalRedCards)) <= 1) {
+        if (Math.abs(Number(tournPred.totalRedCards) - Number(outcomes.totalRedCards)) <= 2) {
           total += 15
           breakdown.push('+15 total red cards')
         }
@@ -375,8 +375,8 @@ exports.scoreAllPlayers = functions.https.onCall(async (data, context) => {
 
       // Yellow card predictions
       if (outcomes.totalYellowCards !== undefined && tournPred.totalYellowCards !== undefined) {
-        if (Math.abs(Number(tournPred.totalYellowCards) - Number(outcomes.totalYellowCards)) <= 10) {
-          total += 25
+        if (Math.abs(Number(tournPred.totalYellowCards) - Number(outcomes.totalYellowCards)) <= 15) {
+        total += 25
           breakdown.push('+25 total yellow cards')
         }
       }
