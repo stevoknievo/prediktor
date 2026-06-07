@@ -110,7 +110,7 @@ function calcMatchPoints(fixture, pred, matchEvents, tournamentPred) {
       if (namedScorers.includes(scorer.toLowerCase())) { total += 2; breakdown.push(`⚽ ${scorer} goal +2`) }
     }
     for (const assister of (matchEvents.assisters || [])) {
-      if (namedAssisters.includes(assister.toLowerCase())) { total += 1; breakdown.push(`🎯 ${assister} assist +1`) }
+      if (namedAssisters.includes(assister.toLowerCase())) { total += 2; breakdown.push(`🎯 ${assister} assist +2`) }
     }
   }
 
