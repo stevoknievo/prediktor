@@ -70,13 +70,19 @@ async function getAllTournamentPredictions() {
     getDocs(collection(db, 'players')),
     getDocs(collection(db, 'tournamentPredictions'))
   ])
-  const players = {}
-  playersSnap.docs.forEach(d => { players[d.id] = d.data() })
-  return predsSnap.docs.map(d => ({
-    ...d.data(),
-    nickname: players[d.id]?.nickname || 'Unknown',
-    totalPoints: players[d.id]?.totalPoints || 0
-  }))
+  const tournPreds = {}
+  predsSnap.docs.forEach(d => { tournPreds[d.id] = d.data() })
+  
+  return playersSnap.docs.map(d => {
+    const player = d.data()
+    const tourn = tournPreds[player.id] || {}
+    return {
+      ...tourn,
+      playerId: player.id,
+      nickname: player.nickname,
+      totalPoints: player.totalPoints || 0,
+    }
+  })
 }
 
 function calcMatchPoints(fixture, pred) {
