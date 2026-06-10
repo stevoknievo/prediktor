@@ -240,8 +240,8 @@ ${oddsText}
 
 SCORING SYSTEM REMINDER:
 - Correct score: 6pts, Correct result: 3pts
-- Named scorer goal: 2pts, Named assister assist: 2pt, Named GK clean sheet: 3pts
-- Tournament winner: 15pts, Golden Boot: 15/10pts, Top assists: 15/10pts, Most clean sheets GK: 15/10pts
+- Named scorer goal: 2pts, Named assister assist: 1pt, Named GK clean sheet: 3pts
+- Tournament winner: 15pts, Golden Boot: 15/10pts, Top assists: 10/5pts, Most clean sheets GK: 15/10pts
 - Card predictions: various bonus points
 
 TASK: Write a compelling 500-word probabilistic leaderboard forecast covering:
@@ -327,6 +327,46 @@ export default function ScoutReport({ playerId, nickname }) {
     setLoading(false)
   }
 
+
+function buildSeedPrompt(allData, odds) {
+  const { players, matchPreds, tournPreds, fixtures } = allData
+  const playerSummaries = Object.values(players).map(player => {
+    const pid = player.id
+    const myMatchPreds = matchPreds[pid] || {}
+    const myTournPred = tournPreds[pid] || {}
+    const preds = Object.entries(myMatchPreds)
+      .filter(([, p]) => p.score90Home !== undefined && p.score90Home !== '')
+    const avgGoals = preds.length
+      ? (preds.reduce((s, [, p]) => s + Number(p.score90Home) + Number(p.score90Away), 0) / preds.length).toFixed(1)
+      : 0
+    const boldness = preds.length > 0
+      ? ((Number(avgGoals) - 2.5) * 10 + preds.filter(([, p]) => Math.abs(Number(p.score90Home) - Number(p.score90Away)) >= 3).length * 5).toFixed(0)
+      : 0
+    return {
+      nickname: player.nickname,
+      currentPoints: player.totalPoints || 0,
+      predictedCount: preds.length,
+      winner: myTournPred.tournamentWinner || 'no pick',
+      namedScorers: (myTournPred.namedScorers || []).filter(Boolean).join(', ') || 'none',
+      avgGoals, boldness: Number(boldness),
+    }
+  }).sort((a, b) => b.currentPoints - a.currentPoints)
+
+  const oddsText = odds || 'Use general football knowledge'
+
+  return `You are a football statistics analyst. Based on all players' locked-in predictions for World Cup 2026 and the bookmaker odds, produce a seed ranking of predicted final standings.
+
+PLAYERS:
+${playerSummaries.map((p, i) => `${i+1}. ${p.nickname} — current: ${p.currentPoints}pts, winner pick: ${p.winner}, scorers: ${p.namedScorers}, fixtures predicted: ${p.predictedCount}/104, avg goals/game: ${p.avgGoals}, boldness: ${p.boldness}`).join('\n')}
+
+ODDS: ${oddsText}
+
+Return ONLY a JSON array, no explanation, no markdown. Format:
+[{"nickname":"PlayerName","seed":1,"reason":"One short sentence why"},{"nickname":"PlayerName2","seed":2,"reason":"..."}]
+
+Rank from most likely to win (seed 1) to least likely. Consider: alignment with bookmaker odds, volume of predictions submitted, named player quality, and scoring upside.`
+}
+
   async function handleLeaderboardForecast() {
     setLeaderboardLoading(true)
     setLeaderboardError('')
@@ -349,6 +389,23 @@ export default function ScoutReport({ playerId, nickname }) {
 
       const text = result.data.report
       setLeaderboardForecast(text)
+
+      // Also generate structured seed rankings
+      const seedPrompt = buildSeedPrompt(allData, odds)
+      const seedResult = await generateScoutReportFn({ prompt: seedPrompt })
+      if (seedResult.data.success) {
+        try {
+          const clean = seedResult.data.report.replace(/```json|```/g, '').trim()
+          const seeds = JSON.parse(clean)
+          await setDoc(doc(db, 'meta', 'leaderboardSeeds'), {
+            seeds,
+            generatedAt: serverTimestamp(),
+          })
+        } catch (e) {
+          console.warn('Could not parse seed rankings:', e.message)
+        }
+      }
+
       await setDoc(doc(db, 'meta', 'leaderboardForecast'), {
         forecast: text,
         generatedAt: serverTimestamp(),
