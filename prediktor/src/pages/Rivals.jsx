@@ -248,20 +248,40 @@ function FixturePredictionsModal({ nickname, playerId, onClose, fixtures }) {
                             </div>
                           </div>
 
-                          {/* Their prediction */}
+                         {/* Their prediction */}
                           <div style={{
                             fontFamily: 'var(--font-display)',
                             fontSize: '1rem',
                             color: correct ? 'var(--green)' : correctResult ? 'var(--gold)' : 'var(--white)',
                             minWidth: 36, textAlign: 'center'
                           }}>
-                            {predH}-{predA}
+                            <div>{predH}-{predA}</div>
+                            {pred.scoreETHome !== undefined && pred.scoreETHome !== '' && (
+                              <div style={{ fontSize: '0.65rem', color: 'var(--cyan)', marginTop: '0.1rem' }}>
+                                ET {pred.scoreETHome}-{pred.scoreETAway}
+                              </div>
+                            )}
+                            {pred.scorePenHome !== undefined && pred.scorePenHome !== '' && (
+                              <div style={{ fontSize: '0.65rem', color: 'var(--red)', marginTop: '0.1rem' }}>
+                                Pens {pred.scorePenHome}-{pred.scorePenAway}
+                              </div>
+                            )}
                           </div>
 
                           {/* Actual result */}
                           {f.completed ? (
                             <div style={{ fontSize: '0.72rem', color: 'var(--muted)', minWidth: 44, textAlign: 'center' }}>
                               <div>({actH}-{actA})</div>
+                              {f.hasExtraTime && f.scoreAfterETHome !== null && (
+                                <div style={{ color: 'var(--cyan)', marginTop: '0.1rem' }}>
+                                  ET {f.scoreAfterETHome}-{f.scoreAfterETAway}
+                                </div>
+                              )}
+                              {f.hasPenalties && f.scorePenHome !== null && (
+                                <div style={{ color: 'var(--red)', marginTop: '0.1rem' }}>
+                                  Pens {f.scorePenHome}-{f.scorePenAway}
+                                </div>
+                              )}
                             </div>
                           ) : (
                             <div style={{ fontSize: '0.68rem', color: 'var(--muted)', minWidth: 44, textAlign: 'center' }}>
