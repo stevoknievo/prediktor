@@ -1,6 +1,6 @@
 // src/pages/Tournament.jsx
 import { useState, useEffect, useRef } from 'react'
-import { saveTournamentPrediction, getTournamentPrediction } from '../lib/db'
+import { saveTournamentPrediction, getTournamentPrediction, getDeadline } from '../lib/db'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 
@@ -17,24 +17,18 @@ const WC2026_TEAMS = [
   'USA','Uzbekistan'
 ].sort()
 
-// Player search autocomplete component
 function PlayerSearch({ value, onChange, placeholder, players, disabled }) {
   const [query, setQuery] = useState(value || '')
   const [open, setOpen] = useState(false)
   const [filtered, setFiltered] = useState([])
   const ref = useRef(null)
 
-  useEffect(() => {
-    setQuery(value || '')
-  }, [value])
+  useEffect(() => { setQuery(value || '') }, [value])
 
   useEffect(() => {
     if (query.length < 2) { setFiltered([]); return }
     const q = query.toLowerCase()
-    const matches = players
-      .filter(p => p.toLowerCase().includes(q))
-      .slice(0, 8)
-    setFiltered(matches)
+    setFiltered(players.filter(p => p.toLowerCase().includes(q)).slice(0, 8))
   }, [query, players])
 
   useEffect(() => {
@@ -45,17 +39,8 @@ function PlayerSearch({ value, onChange, placeholder, players, disabled }) {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
-  function handleSelect(player) {
-    setQuery(player)
-    onChange(player)
-    setOpen(false)
-  }
-
-  function handleChange(e) {
-    setQuery(e.target.value)
-    onChange(e.target.value)
-    setOpen(true)
-  }
+  function handleSelect(player) { setQuery(player); onChange(player); setOpen(false) }
+  function handleChange(e) { setQuery(e.target.value); onChange(e.target.value); setOpen(true) }
 
   return (
     <div ref={ref} style={{ position: 'relative', marginBottom: '0.5rem' }}>
@@ -90,8 +75,7 @@ function PlayerSearch({ value, onChange, placeholder, players, disabled }) {
               onMouseDown={() => handleSelect(player)}
               style={{
                 padding: '0.6rem 1rem', cursor: 'pointer', fontSize: '0.9rem',
-                borderBottom: '1px solid var(--border)',
-                transition: 'background 0.1s'
+                borderBottom: '1px solid var(--border)', transition: 'background 0.1s'
               }}
               onMouseEnter={e => e.currentTarget.style.background = 'var(--panel)'}
               onMouseLeave={e => e.currentTarget.style.background = ''}
@@ -105,7 +89,7 @@ function PlayerSearch({ value, onChange, placeholder, players, disabled }) {
   )
 }
 
-function NamedPlayerSection({ label, hint, badge, names, onChange, players, gkMode }) {
+function NamedPlayerSection({ label, hint, badge, names, onChange, players, disabled }) {
   return (
     <div style={{ marginBottom: '1.5rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
@@ -124,6 +108,7 @@ function NamedPlayerSection({ label, hint, badge, names, onChange, players, gkMo
           }}
           placeholder={`Player ${i + 1} — type to search`}
           players={players}
+          disabled={disabled}
         />
       ))}
     </div>
@@ -147,16 +132,15 @@ export default function Tournament({ playerId }) {
   const [loading, setLoading] = useState(true)
   const [allPlayers, setAllPlayers] = useState([])
   const [goalkeepers, setGoalkeepers] = useState([])
+  const [isLocked, setIsLocked] = useState(false)
 
-  // Load squads from Firestore
   useEffect(() => {
     async function loadSquads() {
       try {
         const snap = await getDoc(doc(db, 'meta', 'squads'))
         if (snap.exists()) {
           const squads = snap.data().players
-          const outfield = []
-          const gks = []
+          const outfield = [], gks = []
           for (const team of Object.values(squads)) {
             outfield.push(...(team.outfield || []))
             gks.push(...(team.goalkeepers || []))
@@ -173,13 +157,18 @@ export default function Tournament({ playerId }) {
 
   useEffect(() => {
     if (!playerId) return
-    getTournamentPrediction(playerId).then(existing => {
+    Promise.all([
+      getTournamentPrediction(playerId),
+      getDeadline(),
+    ]).then(([existing, deadline]) => {
       if (existing) setData(d => ({ ...d, ...existing }))
+      if (deadline) setIsLocked(new Date() > new Date(deadline))
       setLoading(false)
     })
   }, [playerId])
 
   async function handleSave() {
+    if (isLocked) return
     setSaving(true)
     await saveTournamentPrediction(playerId, data)
     setSaving(false)
@@ -189,16 +178,26 @@ export default function Tournament({ playerId }) {
 
   if (loading) return <div className="page"><div className="spinner" /></div>
 
-  // All outfield players for scorers/assisters
   const outfieldPlayers = allPlayers.length > 0 ? allPlayers : []
   const gkPlayers = goalkeepers.length > 0 ? goalkeepers : []
 
   return (
     <div className="page">
       <h2 style={{ marginBottom: '0.5rem' }}>MY PICKS</h2>
-      <p style={{ marginBottom: '1.75rem', fontSize: '0.9rem' }}>
-        These predictions score big points — set them before the tournament starts!
-      </p>
+
+      {isLocked ? (
+        <div style={{
+          background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+          borderRadius: 'var(--radius)', padding: '0.75rem 1rem', marginBottom: '1.25rem',
+          fontSize: '0.88rem', color: 'var(--red)'
+        }}>
+          🔒 The deadline has passed — your picks are locked in.
+        </div>
+      ) : (
+        <p style={{ marginBottom: '1.75rem', fontSize: '0.9rem' }}>
+          These predictions score big points — set them before the tournament starts!
+        </p>
+      )}
 
       {/* Winner */}
       <div className="card" style={{ marginBottom: '1rem' }}>
@@ -209,6 +208,7 @@ export default function Tournament({ playerId }) {
         <select
           value={data.tournamentWinner}
           onChange={e => setData(d => ({ ...d, tournamentWinner: e.target.value }))}
+          disabled={isLocked}
         >
           <option value="">-- Select a team --</option>
           {WC2026_TEAMS.map(t => <option key={t} value={t}>{t}</option>)}
@@ -230,15 +230,17 @@ export default function Tournament({ playerId }) {
           names={data.namedScorers}
           onChange={v => setData(d => ({ ...d, namedScorers: v }))}
           players={outfieldPlayers}
+          disabled={isLocked}
         />
 
         <NamedPlayerSection
           label="3 ASSISTERS"
-          hint="2pt per assist · 15pts most assists (outright) · 10pts joint"
-          badge="2pt/assist"
+          hint="2pts per assist · 15pts most assists (outright) · 10pts joint"
+          badge="2pts/assist"
           names={data.namedAssisters}
           onChange={v => setData(d => ({ ...d, namedAssisters: v }))}
           players={outfieldPlayers}
+          disabled={isLocked}
         />
 
         <NamedPlayerSection
@@ -248,6 +250,7 @@ export default function Tournament({ playerId }) {
           names={data.namedGoalies}
           onChange={v => setData(d => ({ ...d, namedGoalies: v }))}
           players={gkPlayers}
+          disabled={isLocked}
         />
       </div>
 
@@ -260,9 +263,11 @@ export default function Tournament({ playerId }) {
             <label style={{ fontFamily: 'var(--font-display)', fontSize: '0.9rem' }}>TOTAL RED CARDS IN TOURNAMENT</label>
             <span className="badge badge-gold">15 pts</span>
           </div>
-          <p style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>Within 1 of actual total</p>
-          <input type="number" min={0} max={100} placeholder="e.g. 8" value={data.totalRedCards}
-            onChange={e => setData(d => ({ ...d, totalRedCards: e.target.value }))} />
+          <p style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>Within 2 of actual total</p>
+          <input type="number" min={0} max={100} placeholder="e.g. 8"
+            value={data.totalRedCards}
+            onChange={e => setData(d => ({ ...d, totalRedCards: e.target.value }))}
+            disabled={isLocked} />
         </div>
 
         <div style={{ marginBottom: '1.25rem' }}>
@@ -270,7 +275,11 @@ export default function Tournament({ playerId }) {
             <label style={{ fontFamily: 'var(--font-display)', fontSize: '0.9rem' }}>TEAM WITH MOST RED CARDS</label>
             <span className="badge badge-gold">20 pts</span>
           </div>
-          <select value={data.mostRedCardTeam} onChange={e => setData(d => ({ ...d, mostRedCardTeam: e.target.value }))}>
+          <select
+            value={data.mostRedCardTeam}
+            onChange={e => setData(d => ({ ...d, mostRedCardTeam: e.target.value }))}
+            disabled={isLocked}
+          >
             <option value="">-- Select a team --</option>
             {WC2026_TEAMS.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
@@ -281,9 +290,11 @@ export default function Tournament({ playerId }) {
             <label style={{ fontFamily: 'var(--font-display)', fontSize: '0.9rem' }}>TOTAL YELLOW CARDS IN TOURNAMENT</label>
             <span className="badge badge-gold">25 pts</span>
           </div>
-          <p style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>Within 10 of actual total</p>
-          <input type="number" min={0} max={500} placeholder="e.g. 180" value={data.totalYellowCards}
-            onChange={e => setData(d => ({ ...d, totalYellowCards: e.target.value }))} />
+          <p style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.5rem' }}>Within 15 of actual total</p>
+          <input type="number" min={0} max={500} placeholder="e.g. 180"
+            value={data.totalYellowCards}
+            onChange={e => setData(d => ({ ...d, totalYellowCards: e.target.value }))}
+            disabled={isLocked} />
         </div>
 
         <div style={{ marginBottom: '1.25rem' }}>
@@ -291,7 +302,11 @@ export default function Tournament({ playerId }) {
             <label style={{ fontFamily: 'var(--font-display)', fontSize: '0.9rem' }}>TEAM WITH MOST YELLOW CARDS</label>
             <span className="badge badge-gold">20 pts</span>
           </div>
-          <select value={data.mostYellowCardTeam} onChange={e => setData(d => ({ ...d, mostYellowCardTeam: e.target.value }))}>
+          <select
+            value={data.mostYellowCardTeam}
+            onChange={e => setData(d => ({ ...d, mostYellowCardTeam: e.target.value }))}
+            disabled={isLocked}
+          >
             <option value="">-- Select a team --</option>
             {WC2026_TEAMS.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
@@ -302,21 +317,27 @@ export default function Tournament({ playerId }) {
             <label style={{ fontFamily: 'var(--font-display)', fontSize: '0.9rem' }}>TEAM WITH FEWEST YELLOW CARDS</label>
             <span className="badge badge-gold">30 pts</span>
           </div>
-          <select value={data.fewestYellowCardTeam} onChange={e => setData(d => ({ ...d, fewestYellowCardTeam: e.target.value }))}>
+          <select
+            value={data.fewestYellowCardTeam}
+            onChange={e => setData(d => ({ ...d, fewestYellowCardTeam: e.target.value }))}
+            disabled={isLocked}
+          >
             <option value="">-- Select a team --</option>
             {WC2026_TEAMS.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
         </div>
       </div>
 
-      <button
-        className="btn btn-primary w-full"
-        style={{ marginTop: '0.5rem', fontSize: '1.2rem', padding: '1rem' }}
-        onClick={handleSave}
-        disabled={saving}
-      >
-        {saving ? 'SAVING...' : saved ? '✓ SAVED!' : 'SAVE PREDICTIONS'}
-      </button>
+      {!isLocked && (
+        <button
+          className="btn btn-primary w-full"
+          style={{ marginTop: '0.5rem', fontSize: '1.2rem', padding: '1rem' }}
+          onClick={handleSave}
+          disabled={saving}
+        >
+          {saving ? 'SAVING...' : saved ? '✓ SAVED!' : 'SAVE PREDICTIONS'}
+        </button>
+      )}
     </div>
   )
 }
