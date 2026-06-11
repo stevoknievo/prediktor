@@ -1,7 +1,8 @@
 // src/pages/Join.jsx
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
 import { db } from '../lib/firebase'
+import { getDeadline } from '../lib/db'
 
 function makePlayerId(nickname, pin) {
   return `${nickname.trim().toLowerCase().replace(/\s+/g, '_')}_${pin}`
@@ -13,6 +14,13 @@ export default function Join({ onJoin }) {
   const [pin, setPin] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [isLocked, setIsLocked] = useState(false)
+
+  useEffect(() => {
+    getDeadline().then(d => {
+      if (d) setIsLocked(new Date() > new Date(d))
+    })
+  }, [])
 
   async function handleNew(e) {
     e.preventDefault()
@@ -59,7 +67,7 @@ export default function Join({ onJoin }) {
     try {
       const existing = await getDoc(doc(db, 'players', id))
       if (!existing.exists()) {
-        setError('No player found with that nickname and PIN. Check your details or join as new.')
+        setError('No player found with that nickname and PIN. Check your details.')
         setLoading(false)
         return
       }
@@ -103,9 +111,11 @@ export default function Join({ onJoin }) {
         {mode === 'choice' && (
           <div className="card" style={{ padding: '2rem' }}>
             <h3 style={{ marginBottom: '1.5rem' }}>WELCOME</h3>
-            <button className="btn btn-primary w-full" style={{ marginBottom: '0.75rem', fontSize: '1.1rem' }} onClick={() => setMode('new')}>
-              JOIN THE GAME
-            </button>
+            {!isLocked && (
+              <button className="btn btn-primary w-full" style={{ marginBottom: '0.75rem', fontSize: '1.1rem' }} onClick={() => setMode('new')}>
+                JOIN THE GAME
+              </button>
+            )}
             <button className="btn btn-ghost w-full" style={{ fontSize: '1.1rem' }} onClick={() => setMode('returning')}>
               I'VE PLAYED BEFORE
             </button>
@@ -185,7 +195,7 @@ export default function Join({ onJoin }) {
         )}
 
         <p style={{ marginTop: '1.25rem', fontSize: '0.8rem' }}>
-          {mode === 'new' ? 'Remember your PIN — you\'ll need it to log back in on any device.' : ''}
+          {mode === 'new' ? "Remember your PIN — you'll need it to log back in on any device." : ''}
         </p>
       </div>
     </div>
