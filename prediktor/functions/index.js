@@ -346,7 +346,6 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
         if (fixture.score90Home === 0) cleanSheetTeams.push(fixture.awayTeam)
         if (fixture.score90Away === 0) cleanSheetTeams.push(fixture.homeTeam)
 
-        const docId = fixture.ourId || fixture.id
         await db.collection('matchEvents').doc(docId).set({
           fixtureId: docId,
           homeTeam: fixture.homeTeam,
