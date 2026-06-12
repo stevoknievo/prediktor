@@ -47,8 +47,8 @@ function normalizeFixture(f) {
     status: fixture.status?.short || null,
     stage: f.league?.round || null,
     isKnockout,
-    homeTeam: teams.home?.name || null,
-    awayTeam: teams.away?.name || null,
+    homeTeam: normaliseTeamName(teams.home?.name) || null,
+    awayTeam: normaliseTeamName(teams.away?.name) || null,
     homeTeamCode: teams.home?.code || null,
     awayTeamCode: teams.away?.code || null,
     homeLogo: teams.home?.logo || null,
@@ -63,6 +63,32 @@ function normalizeFixture(f) {
     scorePenHome: score?.penalty?.home ?? null,
     scorePenAway: score?.penalty?.away ?? null,
   }
+}
+
+// ── Team name normalisation ───────────────────────────────────────────────
+// Maps API-Football team names to our seeded names
+
+const TEAM_NAME_MAP = {
+  'Cape Verde Islands': 'Cape Verde',
+  'Cabo Verde': 'Cape Verde',
+  "Côte d'Ivoire": 'Ivory Coast',
+  "Cote d'Ivoire": 'Ivory Coast',
+  'Congo DR': 'DR Congo',
+  'DR Congo': 'DR Congo',
+  'Democratic Republic of Congo': 'DR Congo',
+  'Czechia': 'Czech Republic',
+  'United States': 'USA',
+  'Korea Republic': 'South Korea',
+  'Republic of Korea': 'South Korea',
+  'Curacao': 'Curaçao',
+  'Bosnia and Herzegovina': 'Bosnia & Herzegovina',
+  'Bosnia-Herzegovina': 'Bosnia & Herzegovina',
+  'Turkey': 'Türkiye',
+}
+
+function normaliseTeamName(name) {
+  if (!name) return name
+  return TEAM_NAME_MAP[name] || name
 }
 
 // ── Shared scoring logic ──────────────────────────────────────────────────
@@ -219,18 +245,60 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
     }
 
     const fixtures = result.response.map(normalizeFixture)
+
+    // Load our seeded fixtures to build a team-name -> mXXX ID lookup
+    const seededSnap = await db.collection('fixtures').get()
+    const teamLookup = {} // "HomeTeam|AwayTeam" -> mXXX doc ID
+    seededSnap.docs.forEach(d => {
+      const data = d.data()
+      if (d.id.startsWith('m') && data.homeTeam && data.awayTeam) {
+        teamLookup[`${data.homeTeam}|${data.awayTeam}`] = d.id
+      }
+    })
+
     const batch = db.batch()
+    const apiToOurId = {} // API numeric ID -> our mXXX ID
+
     for (const f of fixtures) {
-      batch.set(db.collection('fixtures').doc(f.id), f, { merge: true })
+      const key = `${f.homeTeam}|${f.awayTeam}`
+      const ourId = teamLookup[key]
+      if (ourId) {
+        // Update our existing mXXX document with result data
+        apiToOurId[f.id] = ourId
+        batch.set(db.collection('fixtures').doc(ourId), {
+          completed: f.completed,
+          status: f.status,
+          hasExtraTime: f.hasExtraTime,
+          hasPenalties: f.hasPenalties,
+          score90Home: f.score90Home,
+          score90Away: f.score90Away,
+          scoreAfterETHome: f.scoreAfterETHome,
+          scoreAfterETAway: f.scoreAfterETAway,
+          scorePenHome: f.scorePenHome,
+          scorePenAway: f.scorePenAway,
+          homeLogo: f.homeLogo,
+          awayLogo: f.awayLogo,
+          homeTeamCode: f.homeTeamCode,
+          awayTeamCode: f.awayTeamCode,
+          apiFixtureId: f.id,
+        }, { merge: true })
+      } else {
+        console.warn(`syncFixtures: no mXXX match for ${f.homeTeam} vs ${f.awayTeam}`)
+      }
     }
     await batch.commit()
 
-    const completedFixtures = fixtures.filter(f => f.completed)
+    // Use our mXXX IDs for events, filter to completed fixtures that have a mapping
+    const completedFixtures = fixtures.filter(f => f.completed && apiToOurId[f.id]).map(f => ({
+      ...f,
+      ourId: apiToOurId[f.id]
+    }))
     let eventsUpdated = 0
 
     for (const fixture of completedFixtures) {
       try {
-        const existingEvents = await db.collection('matchEvents').doc(fixture.id).get()
+        const docId = fixture.ourId || fixture.id
+        const existingEvents = await db.collection('matchEvents').doc(docId).get()
         if (existingEvents.exists) continue
 
         const [eventsResult, lineupsResult] = await Promise.all([
@@ -278,8 +346,9 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
         if (fixture.score90Home === 0) cleanSheetTeams.push(fixture.awayTeam)
         if (fixture.score90Away === 0) cleanSheetTeams.push(fixture.homeTeam)
 
-        await db.collection('matchEvents').doc(fixture.id).set({
-          fixtureId: fixture.id,
+        const docId = fixture.ourId || fixture.id
+        await db.collection('matchEvents').doc(docId).set({
+          fixtureId: docId,
           homeTeam: fixture.homeTeam,
           awayTeam: fixture.awayTeam,
           date: fixture.date,
