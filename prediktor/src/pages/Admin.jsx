@@ -7,26 +7,50 @@ import { collection, getDocs, deleteDoc, doc, setDoc, getDoc, serverTimestamp } 
 
 const ADMIN_PASS = import.meta.env.VITE_ADMIN_PASS || 'prediktor2026'
 
+function makePlayerId(nickname, pin) {
+  return `${nickname.trim().toLowerCase().replace(/\s+/g, '_')}_${pin}`
+}
+
 function PlayerManager({ addLog }) {
   const [players, setPlayers] = useState([])
   const [loading, setLoading] = useState(false)
+  const [unlockedPlayers, setUnlockedPlayers] = useState([])
 
   async function loadPlayers() {
     setLoading(true)
-    const snap = await getDocs(collection(db, 'players'))
+    const [snap, configSnap] = await Promise.all([
+      getDocs(collection(db, 'players')),
+      getDoc(doc(db, 'meta', 'config'))
+    ])
     setPlayers(snap.docs.map(d => d.data()).sort((a, b) => b.totalPoints - a.totalPoints))
+    setUnlockedPlayers(configSnap.data()?.unlockedPlayers || [])
     setLoading(false)
   }
 
   async function deletePlayer(player) {
     if (!confirm(`Delete ${player.nickname}? This cannot be undone.`)) return
     try {
+      const { getDocs: gd, query, where } = await import('firebase/firestore')
       await deleteDoc(doc(db, 'players', player.id))
+      await deleteDoc(doc(db, 'tournamentPredictions', player.id))
+      await deleteDoc(doc(db, 'scoutReports', player.id))
+      const predsSnap = await gd(query(collection(db, 'predictions'), where('playerId', '==', player.id)))
+      for (const d of predsSnap.docs) await deleteDoc(d.ref)
       setPlayers(prev => prev.filter(p => p.id !== player.id))
-      addLog(`✓ Deleted player: ${player.nickname}`, 'success')
+      addLog(`✓ Deleted ${player.nickname} and all their data`, 'success')
     } catch (err) {
       addLog(`✗ Error deleting player: ${err.message}`, 'error')
     }
+  }
+
+  async function toggleUnlock(player) {
+    const isUnlocked = unlockedPlayers.includes(player.id)
+    const updated = isUnlocked
+      ? unlockedPlayers.filter(id => id !== player.id)
+      : [...unlockedPlayers, player.id]
+    await setDoc(doc(db, 'meta', 'config'), { unlockedPlayers: updated }, { merge: true })
+    setUnlockedPlayers(updated)
+    addLog(`✓ ${player.nickname} ${isUnlocked ? 'locked' : 'unlocked'} for predictions`, 'success')
   }
 
   return (
@@ -40,24 +64,107 @@ function PlayerManager({ addLog }) {
       {players.length === 0 && (
         <p style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>Click "Load Players" to see all participants.</p>
       )}
-      {players.map(player => (
-        <div key={player.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>
-          <div>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: '1rem' }}>{player.nickname}</div>
-            <div style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{player.id}</div>
+      {players.map(player => {
+        const isUnlocked = unlockedPlayers.includes(player.id)
+        return (
+          <div key={player.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid var(--border)', gap: '0.5rem' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '1rem' }}>{player.nickname}</div>
+              <div style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>{player.id}</div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '1rem', color: 'var(--gold)' }}>{player.totalPoints} pts</div>
+              <button
+                onClick={() => toggleUnlock(player)}
+                style={{
+                  fontSize: '0.72rem', padding: '0.25rem 0.6rem',
+                  borderRadius: 6, border: `1px solid ${isUnlocked ? 'var(--green)' : 'var(--border)'}`,
+                  background: isUnlocked ? 'rgba(72,199,116,0.12)' : 'transparent',
+                  color: isUnlocked ? 'var(--green)' : 'var(--muted)',
+                  cursor: 'pointer', whiteSpace: 'nowrap'
+                }}
+              >
+                {isUnlocked ? '🔓 Unlocked' : '🔒 Lock'}
+              </button>
+              <button className="btn btn-danger" style={{ fontSize: '0.72rem', padding: '0.25rem 0.6rem' }} onClick={() => deletePlayer(player)}>
+                Delete
+              </button>
+            </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', color: 'var(--gold)' }}>{player.totalPoints} pts</div>
-            <button className="btn btn-danger" style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem' }} onClick={() => deletePlayer(player)}>
-              Delete
-            </button>
-          </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
 
+function AddPlayerPanel({ addLog }) {
+  const [nickname, setNickname] = useState('')
+  const [pin, setPin] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function handleAdd() {
+    const name = nickname.trim()
+    if (!name || name.length < 2) { addLog('✗ Nickname must be 2+ characters', 'error'); return }
+    if (!/^\d{4}$/.test(pin)) { addLog('✗ PIN must be exactly 4 digits', 'error'); return }
+    setSaving(true)
+    const id = makePlayerId(name, pin)
+    try {
+      const existing = await getDoc(doc(db, 'players', id))
+      if (existing.exists()) {
+        addLog(`✗ Player "${name}" with that PIN already exists`, 'error')
+        setSaving(false)
+        return
+      }
+      // Add player and immediately unlock them so they can predict future fixtures
+      await setDoc(doc(db, 'players', id), {
+        id, nickname: name, totalPoints: 0, createdAt: serverTimestamp()
+      })
+      // Add to unlockedPlayers so they bypass the deadline for future fixtures
+      const configSnap = await getDoc(doc(db, 'meta', 'config'))
+      const existing_unlocked = configSnap.data()?.unlockedPlayers || []
+      if (!existing_unlocked.includes(id)) {
+        await setDoc(doc(db, 'meta', 'config'), {
+          unlockedPlayers: [...existing_unlocked, id]
+        }, { merge: true })
+      }
+      addLog(`✓ Added player "${name}" (PIN: ${pin}) — unlocked for future predictions`, 'success')
+      addLog(`  Share with them: nickname = "${name}", PIN = ${pin}`, 'info')
+      setNickname('')
+      setPin('')
+    } catch (err) {
+      addLog(`✗ Error adding player: ${err.message}`, 'error')
+    }
+    setSaving(false)
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: '1rem' }}>
+      <h3 style={{ marginBottom: '0.5rem' }}>➕ ADD PLAYER</h3>
+      <p style={{ fontSize: '0.82rem', marginBottom: '1rem' }}>
+        Enrol a late participant. They'll be unlocked to predict future (not yet played) fixtures only.
+      </p>
+      <input
+        type="text"
+        placeholder="Nickname"
+        value={nickname}
+        onChange={e => setNickname(e.target.value)}
+        style={{ marginBottom: '0.5rem' }}
+      />
+      <input
+        type="text"
+        inputMode="numeric"
+        placeholder="4-digit PIN"
+        value={pin}
+        onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+        maxLength={4}
+        style={{ marginBottom: '0.75rem', letterSpacing: '0.2em', textAlign: 'center' }}
+      />
+      <button className="btn btn-primary" onClick={handleAdd} disabled={saving || !nickname.trim() || pin.length !== 4}>
+        {saving ? 'Adding...' : 'Add Player'}
+      </button>
+    </div>
+  )
+}
 
 function BroadcastComposer({ addLog }) {
   const [title, setTitle] = useState('')
@@ -129,6 +236,7 @@ export default function Admin() {
   const [log, setLog] = useState([])
   const [loading, setLoading] = useState(false)
   const [deadline, setDeadline] = useState('')
+  const [deadlineLoaded, setDeadlineLoaded] = useState(false)
   const [outcomes, setOutcomes] = useState({
     winner: '', topScorer: '', topAssister: '', topCleanSheet: '',
     totalRedCards: '', mostRedCardTeam: '', totalYellowCards: '',
@@ -139,6 +247,14 @@ export default function Admin() {
     if (authed) {
       getTournamentOutcomes().then(o => {
         if (o) setOutcomes(prev => ({ ...prev, ...o }))
+      })
+      getDoc(doc(db, 'meta', 'config')).then(snap => {
+        if (snap.exists() && snap.data().deadline) {
+          const d = new Date(snap.data().deadline)
+          const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+          setDeadline(local)
+          setDeadlineLoaded(true)
+        }
       })
     }
   }, [authed])
@@ -221,6 +337,8 @@ export default function Admin() {
 
       <PlayerManager addLog={addLog} />
 
+      <AddPlayerPanel addLog={addLog} />
+
       <div className="card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ marginBottom: '1rem' }}>📅 PREDICTION DEADLINE</h3>
         <input type="datetime-local" value={deadline} onChange={e => setDeadline(e.target.value)} style={{ marginBottom: '0.75rem' }} />
@@ -270,7 +388,6 @@ export default function Admin() {
         ))}
         <button className="btn btn-primary" style={{ marginTop: '0.5rem' }} onClick={saveOutcomes}>Save Outcomes</button>
       </div>
-
 
       <div className="card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ marginBottom: '0.5rem' }}>📣 BROADCAST MESSAGE</h3>
