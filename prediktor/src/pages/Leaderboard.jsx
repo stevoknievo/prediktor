@@ -8,7 +8,7 @@ const MEDALS = ['🥇', '🥈', '🥉']
 
 export default function Leaderboard({ playerId, onViewRival }) {
   const [players, setPlayers] = useState([])
-  const [seeds, setSeeds] = useState({}) // nickname -> { seed, reason }
+  const [seeds, setSeeds] = useState({})
   const [showSeeds, setShowSeeds] = useState(false)
   const [loading, setLoading] = useState(true)
 
@@ -44,13 +44,13 @@ export default function Leaderboard({ playerId, onViewRival }) {
           {hasSeedData && (
             <button
               className="btn btn-ghost"
-              style={{ fontSize: '0.75rem', padding: '0.25rem 0.7rem' }}
+              style={{ fontSize: '0.85rem', padding: '0.35rem 0.9rem', color: 'rgba(255,255,255,0.85)', borderColor: 'rgba(255,255,255,0.25)' }}
               onClick={() => setShowSeeds(s => !s)}
             >
               {showSeeds ? 'Hide seeds' : '🔮 Show seeds'}
             </button>
           )}
-          <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
+          <span style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)' }}>
             {players.length} player{players.length !== 1 ? 's' : ''}
           </span>
         </div>
@@ -65,20 +65,20 @@ export default function Leaderboard({ playerId, onViewRival }) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
           <div>
-            <div style={{ fontSize: '0.68rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Your position</div>
+            <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Your position</div>
             <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', color: 'var(--gold)', lineHeight: 1.1 }}>
-              #{myRank} <span style={{ fontSize: '0.9rem', color: 'var(--muted)' }}>of {players.length}</span>
+              #{myRank} <span style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.55)' }}>of {players.length}</span>
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '0.68rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Points</div>
+            <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Points</div>
             <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', color: 'var(--gold)', lineHeight: 1.1 }}>
               {players[myRank - 1]?.totalPoints || 0}
             </div>
           </div>
           {hasSeedData && seeds[players[myRank - 1]?.nickname] && (
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: '0.68rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>AI seed</div>
+              <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>AI seed</div>
               <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', color: 'rgba(99,102,241,0.9)', lineHeight: 1.1 }}>
                 #{seeds[players[myRank - 1]?.nickname]?.seed}
               </div>
@@ -117,7 +117,7 @@ export default function Leaderboard({ playerId, onViewRival }) {
                   width: 28, textAlign: 'center', flexShrink: 0,
                   fontFamily: 'var(--font-display)',
                   fontSize: rank <= 3 ? '1.2rem' : '0.95rem',
-                  color: rank === 1 ? 'var(--gold)' : rank === 2 ? '#c0c0c0' : rank === 3 ? '#cd7f32' : 'var(--muted)'
+                  color: rank === 1 ? 'var(--gold)' : rank === 2 ? '#c0c0c0' : rank === 3 ? '#cd7f32' : 'rgba(255,255,255,0.5)'
                 }}>
                   {rank <= 3 ? MEDALS[rank - 1] : rank}
                 </div>
@@ -134,7 +134,7 @@ export default function Leaderboard({ playerId, onViewRival }) {
                       {player.nickname}
                     </span>
                     {isMe && (
-                      <span style={{ fontSize: '0.65rem', color: 'var(--gold)', fontFamily: 'var(--font-body)' }}>YOU</span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--gold)', fontFamily: 'var(--font-body)' }}>YOU</span>
                     )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.1rem' }}>
@@ -142,14 +142,14 @@ export default function Leaderboard({ playerId, onViewRival }) {
                       onClick={() => onViewRival && onViewRival(player.id)}
                       style={{
                         background: 'none', border: 'none', cursor: 'pointer',
-                        color: 'var(--cyan)', fontSize: '0.68rem', padding: 0,
+                        color: 'var(--cyan)', fontSize: '0.72rem', padding: 0,
                         textDecoration: 'underline'
                       }}
                     >
                       View picks
                     </button>
                     {showSeeds && seedData?.reason && (
-                      <span style={{ fontSize: '0.65rem', color: 'var(--muted)', fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.55)', fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {seedData.reason}
                       </span>
                     )}
@@ -160,13 +160,12 @@ export default function Leaderboard({ playerId, onViewRival }) {
                 {hasSeedData && seedNum && (
                   <div style={{
                     flexShrink: 0,
-                    fontSize: '0.7rem',
+                    fontSize: '0.75rem',
                     fontFamily: 'var(--font-display)',
-                    color: showSeeds ? 'rgba(99,102,241,0.9)' : 'var(--muted)',
+                    color: showSeeds ? 'rgba(99,102,241,0.9)' : 'rgba(255,255,255,0.4)',
                     minWidth: 32, textAlign: 'center',
-                    opacity: showSeeds ? 1 : 0.5,
                   }}>
-                    <div style={{ fontSize: '0.6rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>seed</div>
+                    <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>seed</div>
                     <div>#{seedNum}</div>
                   </div>
                 )}
@@ -181,7 +180,7 @@ export default function Leaderboard({ playerId, onViewRival }) {
                   }}>
                     {player.totalPoints || 0}
                   </div>
-                  <div style={{ fontSize: '0.6rem', color: 'var(--muted)', textTransform: 'uppercase' }}>pts</div>
+                  <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' }}>pts</div>
                 </div>
               </div>
             )
@@ -190,7 +189,7 @@ export default function Leaderboard({ playerId, onViewRival }) {
       )}
 
       {hasSeedData && (
-        <p style={{ fontSize: '0.68rem', color: 'var(--muted)', textAlign: 'center', marginTop: '0.75rem' }}>
+        <p style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)', textAlign: 'center', marginTop: '0.75rem' }}>
           🔮 AI seeds generated before tournament based on predicted final standings
         </p>
       )}
