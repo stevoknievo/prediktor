@@ -4,7 +4,6 @@ import { subscribeFixtures, getPlayerPredictions, savePrediction, getDeadline } 
 import { generateRoundOf32, getKnockoutWinner, GROUP_FIXTURES } from '../lib/qualification'
 import { collection, getDocs, doc, getDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { doc, getDoc } from 'firebase/firestore'
 
 function formatDate(iso) {
   if (!iso) return ''
