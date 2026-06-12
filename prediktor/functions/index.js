@@ -126,10 +126,19 @@ function scorePlayer(player, playerPreds, tournPred, fixtures, matchEvents, goal
         total += 2; breakdown.push(`+2 assist: ${assister}`)
       }
     }
+    // Clean sheets — only award if the named goalkeeper actually started
+    const startingGKNames = (events.startingGoalkeepers || []).map(g => g.name.toLowerCase())
     for (const cleanTeam of (events.cleanSheetTeams || [])) {
       for (const goalie of namedGoalies) {
-        if (goalieTeamMap[goalie.toLowerCase()] === cleanTeam) {
-          total += 3; breakdown.push(`+3 clean sheet: ${goalie} (${cleanTeam})`)
+        const goalieLower = goalie.toLowerCase()
+        const goalieTeam = goalieTeamMap[goalieLower]
+        // Must be named goalie's team AND goalie must have started
+        if (goalieTeam === cleanTeam) {
+          if (startingGKNames.length === 0 || startingGKNames.some(n => n.includes(goalieLower) || goalieLower.includes(n))) {
+            total += 3; breakdown.push(`+3 clean sheet: ${goalie} (${cleanTeam})`)
+          } else {
+            breakdown.push(`0 clean sheet: ${goalie} did not start (${cleanTeam})`)
+          }
         }
       }
     }
@@ -224,7 +233,10 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
         const existingEvents = await db.collection('matchEvents').doc(fixture.id).get()
         if (existingEvents.exists) continue
 
-        const eventsResult = await apiFetch(`/fixtures/events?fixture=${fixture.id}`, footballApiKey)
+        const [eventsResult, lineupsResult] = await Promise.all([
+          apiFetch(`/fixtures/events?fixture=${fixture.id}`, footballApiKey),
+          apiFetch(`/fixtures/lineups?fixture=${fixture.id}`, footballApiKey),
+        ])
         if (!eventsResult.response) continue
 
         const events = eventsResult.response
@@ -245,6 +257,23 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
           }
         }
 
+        // Extract starting goalkeepers from lineups
+        const startingGoalkeepers = []
+        if (lineupsResult?.response) {
+          for (const teamLineup of lineupsResult.response) {
+            const teamName = teamLineup.team?.name
+            const startXI = teamLineup.startXI || []
+            for (const player of startXI) {
+              if (player.player?.pos === 'G') {
+                startingGoalkeepers.push({
+                  name: player.player.name,
+                  team: teamName
+                })
+              }
+            }
+          }
+        }
+
         const cleanSheetTeams = []
         if (fixture.score90Home === 0) cleanSheetTeams.push(fixture.awayTeam)
         if (fixture.score90Away === 0) cleanSheetTeams.push(fixture.homeTeam)
@@ -255,11 +284,12 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
           awayTeam: fixture.awayTeam,
           date: fixture.date,
           goalScorers, assisters, yellowCards, redCards, cleanSheetTeams,
+          startingGoalkeepers,
           fetchedAt: admin.firestore.FieldValue.serverTimestamp()
         })
 
         eventsUpdated++
-        await new Promise(r => setTimeout(r, 200))
+        await new Promise(r => setTimeout(r, 250))
       } catch (err) {
         console.error(`Error fetching events for fixture ${fixture.id}:`, err.message)
       }
@@ -500,10 +530,10 @@ exports.scheduledSync = functions.pubsub
           const existing = await db.collection('matchEvents').doc(fixture.id).get()
           if (existing.exists) continue
 
-          const eventsResult = await apiFetch(
-            `/fixtures/events?fixture=${fixture.id}`,
-            footballApiKey
-          )
+          const [eventsResult, lineupsResult] = await Promise.all([
+            apiFetch(`/fixtures/events?fixture=${fixture.id}`, footballApiKey),
+            apiFetch(`/fixtures/lineups?fixture=${fixture.id}`, footballApiKey),
+          ])
           if (!eventsResult.response) continue
 
           const events = eventsResult.response
@@ -524,6 +554,22 @@ exports.scheduledSync = functions.pubsub
             }
           }
 
+          const startingGoalkeepers = []
+          if (lineupsResult?.response) {
+            for (const teamLineup of lineupsResult.response) {
+              const teamName = teamLineup.team?.name
+              const startXI = teamLineup.startXI || []
+              for (const player of startXI) {
+                if (player.player?.pos === 'G') {
+                  startingGoalkeepers.push({
+                    name: player.player.name,
+                    team: teamName
+                  })
+                }
+              }
+            }
+          }
+
           const cleanSheetTeams = []
           if (fixture.score90Home === 0) cleanSheetTeams.push(fixture.awayTeam)
           if (fixture.score90Away === 0) cleanSheetTeams.push(fixture.homeTeam)
@@ -534,6 +580,7 @@ exports.scheduledSync = functions.pubsub
             awayTeam: fixture.awayTeam,
             date: fixture.date,
             goalScorers, assisters, yellowCards, redCards, cleanSheetTeams,
+            startingGoalkeepers,
             fetchedAt: admin.firestore.FieldValue.serverTimestamp()
           })
 
