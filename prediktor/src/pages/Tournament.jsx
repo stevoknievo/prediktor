@@ -160,9 +160,12 @@ export default function Tournament({ playerId }) {
     Promise.all([
       getTournamentPrediction(playerId),
       getDeadline(),
-    ]).then(([existing, deadline]) => {
+      getDoc(doc(db, 'meta', 'config')),
+    ]).then(([existing, deadline, configSnap]) => {
       if (existing) setData(d => ({ ...d, ...existing }))
-      if (deadline) setIsLocked(new Date() > new Date(deadline))
+      const unlocked = configSnap.exists() ? (configSnap.data().unlockedPlayers || []) : []
+      const playerUnlocked = unlocked.includes(playerId)
+      if (deadline) setIsLocked(new Date() > new Date(deadline) && !playerUnlocked)
       setLoading(false)
     })
   }, [playerId])
