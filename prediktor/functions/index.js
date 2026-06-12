@@ -7,6 +7,7 @@ const https = require('https')
 
 admin.initializeApp()
 const db = admin.firestore()
+db.settings({ ignoreUndefinedProperties: true })
 
 const WC_LEAGUE_ID = 1
 const WC_SEASON = 2026
@@ -42,16 +43,16 @@ function normalizeFixture(f) {
   const isKnockout = ['Round of 32', 'Round of 16', 'Quarter-finals', 'Semi-finals', 'Final', '3rd Place Final'].includes(f.league?.round)
   return {
     id: String(fixture.id),
-    date: fixture.date,
-    status: fixture.status?.short,
-    stage: f.league?.round,
+    date: fixture.date || null,
+    status: fixture.status?.short || null,
+    stage: f.league?.round || null,
     isKnockout,
-    homeTeam: teams.home?.name,
-    awayTeam: teams.away?.name,
-    homeTeamCode: teams.home?.code,
-    awayTeamCode: teams.away?.code,
-    homeLogo: teams.home?.logo,
-    awayLogo: teams.away?.logo,
+    homeTeam: teams.home?.name || null,
+    awayTeam: teams.away?.name || null,
+    homeTeamCode: teams.home?.code || null,
+    awayTeamCode: teams.away?.code || null,
+    homeLogo: teams.home?.logo || null,
+    awayLogo: teams.away?.logo || null,
     completed: ['FT', 'AET', 'PEN'].includes(fixture.status?.short),
     hasExtraTime: ['AET', 'PEN'].includes(fixture.status?.short),
     hasPenalties: fixture.status?.short === 'PEN',
