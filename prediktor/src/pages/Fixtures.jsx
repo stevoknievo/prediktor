@@ -4,6 +4,7 @@ import { subscribeFixtures, getPlayerPredictions, savePrediction, getDeadline } 
 import { generateRoundOf32, getKnockoutWinner, GROUP_FIXTURES } from '../lib/qualification'
 import { collection, getDocs, doc, getDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
+import { doc, getDoc } from 'firebase/firestore'
 
 function formatDate(iso) {
   if (!iso) return ''
@@ -65,52 +66,55 @@ function calcMatchPoints(fixture, pred, matchEvents, tournamentPred) {
   if (!isNaN(h90) && !isNaN(a90) && !isNaN(actH90) && !isNaN(actA90)) {
     const predResult = h90 > a90 ? 'h' : a90 > h90 ? 'a' : 'd'
     const actResult = actH90 > actA90 ? 'h' : actA90 > actH90 ? 'a' : 'd'
-    const correctScore = h90 === actH90 && a90 === actA90
-    if (correctScore) {
-      total += 6
-      breakdown.push('✓ Correct score +6')
-    } else if (predResult === actResult) {
-      total += 3
-      breakdown.push('✓ Correct result +3')
-    }
+    if (predResult === actResult) { total += 3; breakdown.push('✓ Correct result +3') }
+    if (h90 === actH90 && a90 === actA90) { total += 3; breakdown.push('✓ Correct score +3') }
   }
 
-  if (fixture.hasExtraTime && pred.scoreETHome !== undefined && pred.scoreETHome !== '') {
+  if (fixture.hasExtraTime && pred.scoreETHome !== undefined) {
     const hET = Number(pred.scoreETHome), aET = Number(pred.scoreETAway)
     const actHET = Number(fixture.scoreAfterETHome), actAET = Number(fixture.scoreAfterETAway)
     if (!isNaN(hET) && !isNaN(aET) && !isNaN(actHET) && !isNaN(actAET)) {
       const predResET = hET > aET ? 'h' : aET > hET ? 'a' : 'd'
       const actResET = actHET > actAET ? 'h' : actAET > actHET ? 'a' : 'd'
-      if (hET === actHET && aET === actAET) {
-        total += 4; breakdown.push('✓ Correct ET score +4')
-      } else if (predResET === actResET) {
-        total += 2; breakdown.push('✓ Correct ET result +2')
-      }
+      if (predResET === actResET) { total += 2; breakdown.push('✓ Correct ET result +2') }
+      if (hET === actHET && aET === actAET) { total += 2; breakdown.push('✓ Correct ET score +2') }
     }
   }
 
-  if (fixture.hasPenalties && pred.scorePenHome !== undefined && pred.scorePenHome !== '') {
+  if (fixture.hasPenalties && pred.scorePenHome !== undefined) {
     const hPen = Number(pred.scorePenHome), aPen = Number(pred.scorePenAway)
     const actHPen = Number(fixture.scorePenHome), actAPen = Number(fixture.scorePenAway)
     if (!isNaN(hPen) && !isNaN(aPen) && !isNaN(actHPen) && !isNaN(actAPen)) {
       const predPenW = hPen > aPen ? 'h' : 'a'
       const actPenW = actHPen > actAPen ? 'h' : 'a'
-      if (hPen === actHPen && aPen === actAPen) {
-        total += 6; breakdown.push('✓ Correct shootout score +6')
-      } else if (predPenW === actPenW) {
-        total += 3; breakdown.push('✓ Correct shootout result +3')
-      }
+      if (predPenW === actPenW) { total += 3; breakdown.push('✓ Correct shootout result +3') }
+      if (hPen === actHPen && aPen === actAPen) { total += 3; breakdown.push('✓ Correct shootout score +3') }
     }
   }
 
+  // Named player points from match events
   if (matchEvents && tournamentPred) {
     const namedScorers = (tournamentPred.namedScorers || []).filter(Boolean).map(n => n.toLowerCase())
     const namedAssisters = (tournamentPred.namedAssisters || []).filter(Boolean).map(n => n.toLowerCase())
+    const namedGoalies = (tournamentPred.namedGoalies || []).filter(Boolean).map(n => n.toLowerCase())
+
     for (const scorer of (matchEvents.goalScorers || [])) {
-      if (namedScorers.includes(scorer.toLowerCase())) { total += 2; breakdown.push(`⚽ ${scorer} goal +2`) }
+      if (namedScorers.includes(scorer.toLowerCase())) {
+        total += 2
+        breakdown.push(`⚽ ${scorer} goal +2`)
+      }
     }
     for (const assister of (matchEvents.assisters || [])) {
-      if (namedAssisters.includes(assister.toLowerCase())) { total += 2; breakdown.push(`🎯 ${assister} assist +2`) }
+      if (namedAssisters.includes(assister.toLowerCase())) {
+        total += 1
+        breakdown.push(`🎯 ${assister} assist +1`)
+      }
+    }
+    for (const team of (matchEvents.cleanSheetTeams || [])) {
+      // Match goalie to clean sheet team via fixture
+      // We check if named goalie's team kept a clean sheet
+      // Since we don't have goalie->team map here, we show clean sheet info
+      // and trust the server-side scoring for the actual points
     }
   }
 
@@ -342,6 +346,7 @@ export default function Fixtures({ playerId }) {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
   const [stageFilter, setStageFilter] = useState('all')
+  const [isUnlocked, setIsUnlocked] = useState(false)
   const [matchEvents, setMatchEvents] = useState({})
   const [tournamentPred, setTournamentPred] = useState(null)
 
@@ -360,7 +365,17 @@ export default function Fixtures({ playerId }) {
     })
   }, [playerId])
 
-  useEffect(() => { getDeadline().then(d => { setDeadline(d); setLoading(false) }) }, [])
+  useEffect(() => {
+    Promise.all([
+      getDeadline(),
+      getDoc(doc(db, 'meta', 'config')),
+    ]).then(([d, configSnap]) => {
+      setDeadline(d)
+      const unlocked = configSnap.exists() ? (configSnap.data().unlockedPlayers || []) : []
+      setIsUnlocked(unlocked.includes(playerId))
+      setLoading(false)
+    })
+  }, [playerId])
 
   // Load match events for completed fixtures
   useEffect(() => {
@@ -372,7 +387,7 @@ export default function Fixtures({ playerId }) {
   }, [])
 
   const now = new Date()
-  const isLocked = deadline ? now > new Date(deadline) : false
+  const isLocked = deadline ? (now > new Date(deadline) && !isUnlocked) : false
 
   async function handleSave(fixtureId, data) {
     await savePrediction(playerId, fixtureId, data)
