@@ -140,15 +140,31 @@ function scorePlayer(player, playerPreds, tournPred, fixtures, matchEvents, goal
     }
   }
 
+  // Partial name matching helper — handles "Vinicius" matching "Vinicius Junior" etc
+  function namesMatch(predName, apiName) {
+    const p = predName.toLowerCase().trim()
+    const a = apiName.toLowerCase().trim()
+    if (p === a) return true
+    // Check if either name contains the other (handles shortened names)
+    if (a.includes(p) || p.includes(a)) return true
+    // Check last name match (e.g. "Mbappe" matches "Kylian Mbappe")
+    const pParts = p.split(' ')
+    const aParts = a.split(' ')
+    const pLast = pParts[pParts.length - 1]
+    const aLast = aParts[aParts.length - 1]
+    if (pLast.length > 3 && pLast === aLast) return true
+    return false
+  }
+
   // Named player stats per match
   for (const events of Object.values(matchEvents)) {
     for (const scorer of (events.goalScorers || [])) {
-      if (namedScorers.some(n => n.toLowerCase() === scorer.toLowerCase())) {
+      if (namedScorers.some(n => namesMatch(n, scorer))) {
         total += 2; breakdown.push(`+2 goal: ${scorer}`)
       }
     }
     for (const assister of (events.assisters || [])) {
-      if (namedAssisters.some(n => n.toLowerCase() === assister.toLowerCase())) {
+      if (namedAssisters.some(n => namesMatch(n, assister))) {
         total += 2; breakdown.push(`+2 assist: ${assister}`)
       }
     }
@@ -156,14 +172,12 @@ function scorePlayer(player, playerPreds, tournPred, fixtures, matchEvents, goal
     const startingGKNames = (events.startingGoalkeepers || []).map(g => g.name.toLowerCase())
     for (const cleanTeam of (events.cleanSheetTeams || [])) {
       for (const goalie of namedGoalies) {
-        const goalieLower = goalie.toLowerCase()
-        const goalieTeam = goalieTeamMap[goalieLower]
-        // Must be named goalie's team AND goalie must have started
+        const goalieTeam = goalieTeamMap[goalie.toLowerCase().trim()]
         if (goalieTeam === cleanTeam) {
-          if (startingGKNames.length === 0 || startingGKNames.some(n => n.includes(goalieLower) || goalieLower.includes(n))) {
+          if (startingGKNames.length === 0 || startingGKNames.some(n => namesMatch(goalie, n))) {
             total += 3; breakdown.push(`+3 clean sheet: ${goalie} (${cleanTeam})`)
           } else {
-            breakdown.push(`0 clean sheet: ${goalie} did not start (${cleanTeam})`)
+            breakdown.push(`0 pts clean sheet: ${goalie} did not start (${cleanTeam})`)
           }
         }
       }
@@ -429,7 +443,7 @@ exports.scoreAllPlayers = functions.https.onCall(async (data, context) => {
       const tournPred = tournamentPredictions[player.id] || {}
       const { total, breakdown } = scorePlayer(player, playerPreds, tournPred, fixtures, matchEvents, goalieTeamMap, outcomes)
       batch.update(db.collection('players').doc(player.id), { totalPoints: total })
-      results.push({ nickname: player.nickname, total })
+      results.push({ nickname: player.nickname, total, breakdown })
     }
 
     await batch.commit()
