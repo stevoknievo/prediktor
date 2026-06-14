@@ -65,24 +65,50 @@ function resolveKnockoutTeams(fixturesMap, predictions) {
   return resolved
 }
 
+function namesMatch(predName, apiName) {
+  const normalise = n => n.toLowerCase().trim()
+    .replace(/jr\.?/g, 'junior').replace(/st\.?/g, 'saint')
+    .replace(/[-']/g, ' ').replace(/\s+/g, ' ')
+  const p = normalise(predName), a = normalise(apiName)
+  if (p === a) return true
+  if (a.includes(p) || p.includes(a)) return true
+  const pParts = p.split(' '), aParts = a.split(' ')
+  const pLast = pParts[pParts.length-1], aLast = aParts[aParts.length-1]
+  if (pLast.length > 3 && pLast === aLast) return true
+  return false
+}
+
+function calcPlayerStats(matchEvents, goalieTeamMap) {
+  const stats = {}
+  const ensure = name => { if (!stats[name]) stats[name] = { goals: 0, assists: 0, cleanSheets: 0 } }
+  for (const events of Object.values(matchEvents)) {
+    for (const s of (events.goalScorers || [])) { ensure(s); stats[s].goals++ }
+    for (const a of (events.assisters || [])) { ensure(a); stats[a].assists++ }
+    const startingGKNames = (events.startingGoalkeepers || []).map(g => g.name)
+    for (const team of (events.cleanSheetTeams || [])) {
+      for (const [gkName, gkTeam] of Object.entries(goalieTeamMap)) {
+        if (gkTeam === team) {
+          const started = startingGKNames.length === 0 || startingGKNames.some(n => namesMatch(gkName, n))
+          if (started) { ensure(gkName); stats[gkName].cleanSheets++ }
+        }
+      }
+    }
+  }
+  return stats
+}
+
 async function getAllTournamentPredictions() {
   const [playersSnap, predsSnap] = await Promise.all([
     getDocs(collection(db, 'players')),
     getDocs(collection(db, 'tournamentPredictions'))
   ])
-  const tournPreds = {}
-  predsSnap.docs.forEach(d => { tournPreds[d.id] = d.data() })
-  
-  return playersSnap.docs.map(d => {
-    const player = d.data()
-    const tourn = tournPreds[player.id] || {}
-    return {
-      ...tourn,
-      playerId: player.id,
-      nickname: player.nickname,
-      totalPoints: player.totalPoints || 0,
-    }
-  })
+  const players = {}
+  playersSnap.docs.forEach(d => { players[d.id] = d.data() })
+  return predsSnap.docs.map(d => ({
+    ...d.data(),
+    nickname: players[d.id]?.nickname || 'Unknown',
+    totalPoints: players[d.id]?.totalPoints || 0
+  }))
 }
 
 function calcMatchPoints(fixture, pred) {
@@ -248,40 +274,20 @@ function FixturePredictionsModal({ nickname, playerId, onClose, fixtures }) {
                             </div>
                           </div>
 
-                         {/* Their prediction */}
+                          {/* Their prediction */}
                           <div style={{
                             fontFamily: 'var(--font-display)',
                             fontSize: '1rem',
                             color: correct ? 'var(--green)' : correctResult ? 'var(--gold)' : 'var(--white)',
                             minWidth: 36, textAlign: 'center'
                           }}>
-                            <div>{predH}-{predA}</div>
-                            {pred.scoreETHome !== undefined && pred.scoreETHome !== '' && (
-                              <div style={{ fontSize: '0.65rem', color: 'var(--cyan)', marginTop: '0.1rem' }}>
-                                ET {pred.scoreETHome}-{pred.scoreETAway}
-                              </div>
-                            )}
-                            {pred.scorePenHome !== undefined && pred.scorePenHome !== '' && (
-                              <div style={{ fontSize: '0.65rem', color: 'var(--red)', marginTop: '0.1rem' }}>
-                                Pens {pred.scorePenHome}-{pred.scorePenAway}
-                              </div>
-                            )}
+                            {predH}-{predA}
                           </div>
 
                           {/* Actual result */}
                           {f.completed ? (
                             <div style={{ fontSize: '0.72rem', color: 'var(--muted)', minWidth: 44, textAlign: 'center' }}>
                               <div>({actH}-{actA})</div>
-                              {f.hasExtraTime && f.scoreAfterETHome !== null && (
-                                <div style={{ color: 'var(--cyan)', marginTop: '0.1rem' }}>
-                                  ET {f.scoreAfterETHome}-{f.scoreAfterETAway}
-                                </div>
-                              )}
-                              {f.hasPenalties && f.scorePenHome !== null && (
-                                <div style={{ color: 'var(--red)', marginTop: '0.1rem' }}>
-                                  Pens {f.scorePenHome}-{f.scorePenAway}
-                                </div>
-                              )}
                             </div>
                           ) : (
                             <div style={{ fontSize: '0.68rem', color: 'var(--muted)', minWidth: 44, textAlign: 'center' }}>
@@ -326,7 +332,7 @@ function Section({ title, points, children }) {
   )
 }
 
-function PlayerCard({ pred, isMe, fixtures }) {
+function PlayerCard({ pred, isMe, fixtures, playerStats }) {
   const [expanded, setExpanded] = useState(false)
   const [showFixtures, setShowFixtures] = useState(false)
 
@@ -389,27 +395,51 @@ function PlayerCard({ pred, isMe, fixtures }) {
 
             <Section title="Goal Scorers" points="2pts/goal • 15pts Golden Boot">
               {(pred.namedScorers || []).filter(Boolean).length > 0
-                ? (pred.namedScorers || []).filter(Boolean).map((s, i) => (
-                  <div key={i} style={{ fontSize: '0.9rem', marginBottom: '0.25rem' }}>⚽ {s}</div>
-                ))
+                ? (pred.namedScorers || []).filter(Boolean).map((s, i) => {
+                  const match = Object.entries(playerStats).find(([k]) => namesMatch(s, k))
+                  const goals = match ? match[1].goals : 0
+                  const pts = goals * 2
+                  return (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.9rem', marginBottom: '0.25rem' }}>
+                      <span>⚽ {s}</span>
+                      {pts > 0 && <span style={{ fontSize: '0.75rem', color: 'var(--gold)', fontFamily: 'var(--font-display)' }}>{goals}G +{pts}pts</span>}
+                    </div>
+                  )
+                })
                 : <div style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>No picks</div>
               }
             </Section>
 
-            <Section title="Assisters" points="2pts/assist • 10pts top assister">
+            <Section title="Assisters" points="2pts/assist • 15pts top assister">
               {(pred.namedAssisters || []).filter(Boolean).length > 0
-                ? (pred.namedAssisters || []).filter(Boolean).map((s, i) => (
-                  <div key={i} style={{ fontSize: '0.9rem', marginBottom: '0.25rem' }}>🎯 {s}</div>
-                ))
+                ? (pred.namedAssisters || []).filter(Boolean).map((s, i) => {
+                  const match = Object.entries(playerStats).find(([k]) => namesMatch(s, k))
+                  const assists = match ? match[1].assists : 0
+                  const pts = assists * 2
+                  return (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.9rem', marginBottom: '0.25rem' }}>
+                      <span>🎯 {s}</span>
+                      {pts > 0 && <span style={{ fontSize: '0.75rem', color: 'var(--gold)', fontFamily: 'var(--font-display)' }}>{assists}A +{pts}pts</span>}
+                    </div>
+                  )
+                })
                 : <div style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>No picks</div>
               }
             </Section>
 
             <Section title="Goalkeepers" points="3pts/clean sheet • 15pts top GK">
               {(pred.namedGoalies || []).filter(Boolean).length > 0
-                ? (pred.namedGoalies || []).filter(Boolean).map((s, i) => (
-                  <div key={i} style={{ fontSize: '0.9rem', marginBottom: '0.25rem' }}>🧤 {s}</div>
-                ))
+                ? (pred.namedGoalies || []).filter(Boolean).map((s, i) => {
+                  const match = Object.entries(playerStats).find(([k]) => namesMatch(s, k))
+                  const cs = match ? match[1].cleanSheets : 0
+                  const pts = cs * 3
+                  return (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.9rem', marginBottom: '0.25rem' }}>
+                      <span>🧤 {s}</span>
+                      {pts > 0 && <span style={{ fontSize: '0.75rem', color: 'var(--gold)', fontFamily: 'var(--font-display)' }}>{cs}CS +{pts}pts</span>}
+                    </div>
+                  )
+                })
                 : <div style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>No picks</div>
               }
             </Section>
@@ -445,17 +475,32 @@ function PlayerCard({ pred, isMe, fixtures }) {
 export default function Rivals({ playerId, initialPlayerId }) {
   const [predictions, setPredictions] = useState([])
   const [fixtures, setFixtures] = useState({})
+  const [playerStats, setPlayerStats] = useState({})
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
 
   useEffect(() => {
     Promise.all([
       getAllTournamentPredictions(),
-      getDocs(collection(db, 'fixtures'))
-    ]).then(([preds, fixturesSnap]) => {
+      getDocs(collection(db, 'fixtures')),
+      getDocs(collection(db, 'matchEvents')),
+      getDoc(doc(db, 'meta', 'squads')),
+    ]).then(([preds, fixturesSnap, eventsSnap, squadsSnap]) => {
       const fixturesMap = {}
       fixturesSnap.docs.forEach(d => { fixturesMap[d.id] = d.data() })
       setFixtures(fixturesMap)
+
+      const eventsMap = {}
+      eventsSnap.docs.forEach(d => { eventsMap[d.id] = d.data() })
+
+      const gtMap = {}
+      if (squadsSnap.exists()) {
+        for (const [team, squad] of Object.entries(squadsSnap.data().players || {})) {
+          for (const gk of (squad.goalkeepers || [])) gtMap[gk.toLowerCase()] = team
+        }
+      }
+      setPlayerStats(calcPlayerStats(eventsMap, gtMap))
+
       preds.sort((a, b) => {
         if (a.playerId === playerId) return -1
         if (b.playerId === playerId) return 1
@@ -508,6 +553,7 @@ export default function Rivals({ playerId, initialPlayerId }) {
             pred={pred}
             isMe={pred.playerId === playerId}
             fixtures={fixtures}
+            playerStats={playerStats}
           />
         </div>
       ))}
