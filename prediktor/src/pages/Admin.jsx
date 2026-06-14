@@ -291,6 +291,11 @@ export default function Admin() {
       if (result.data.success) {
         for (const r of result.data.results) {
           addLog(`  ${r.nickname}: ${r.total} pts`, 'success')
+          if (r.breakdown && r.breakdown.length > 0) {
+            for (const b of r.breakdown) {
+              addLog(`    ${b}`, 'info')
+            }
+          }
         }
         addLog('✓ Scoring complete!', 'success')
       } else {
