@@ -396,7 +396,7 @@ function PlayerCard({ pred, isMe, fixtures }) {
               }
             </Section>
 
-            <Section title="Assisters" points="1pt/assist • 10pts top assister">
+            <Section title="Assisters" points="2pts/assist • 10pts top assister">
               {(pred.namedAssisters || []).filter(Boolean).length > 0
                 ? (pred.namedAssisters || []).filter(Boolean).map((s, i) => (
                   <div key={i} style={{ fontSize: '0.9rem', marginBottom: '0.25rem' }}>🎯 {s}</div>
