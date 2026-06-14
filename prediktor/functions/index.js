@@ -142,12 +142,15 @@ function scorePlayer(player, playerPreds, tournPred, fixtures, matchEvents, goal
 
   // Partial name matching helper — handles "Vinicius" matching "Vinicius Junior" etc
   function namesMatch(predName, apiName) {
-    const p = predName.toLowerCase().trim()
-    const a = apiName.toLowerCase().trim()
+    const normalise = n => n.toLowerCase().trim()
+      .replace(/\bjr\.?\b/g, 'junior')
+      .replace(/\bst\.?\b/g, 'saint')
+      .replace(/[-']/g, ' ')
+      .replace(/\s+/g, ' ')
+    const p = normalise(predName)
+    const a = normalise(apiName)
     if (p === a) return true
-    // Check if either name contains the other (handles shortened names)
     if (a.includes(p) || p.includes(a)) return true
-    // Check last name match (e.g. "Mbappe" matches "Kylian Mbappe")
     const pParts = p.split(' ')
     const aParts = a.split(' ')
     const pLast = pParts[pParts.length - 1]
