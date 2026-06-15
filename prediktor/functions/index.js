@@ -281,6 +281,8 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
         // Update our existing mXXX document with result data
         apiToOurId[f.id] = ourId
         batch.set(db.collection('fixtures').doc(ourId), {
+          date: f.date,
+          venue: f.venue,
           completed: f.completed,
           status: f.status,
           hasExtraTime: f.hasExtraTime,
