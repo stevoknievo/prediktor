@@ -52,8 +52,12 @@ function calcPlayerStats(matchEvents, goalieTeamMap) {
     for (const team of (events.cleanSheetTeams || [])) {
       for (const [gkName, gkTeam] of Object.entries(goalieTeamMap)) {
         if (gkTeam === team) {
-          const started = startingGKNames.length === 0 || startingGKNames.some(n => namesMatch(gkName, n))
-          if (started) { ensure(gkName); stats[gkName].cleanSheets++ }
+          if (startingGKNames.length === 0) {
+            ensure(gkName); stats[gkName].cleanSheets++
+          } else {
+            const actualName = startingGKNames.find(n => namesMatch(gkName, n))
+            if (actualName) { ensure(actualName); stats[actualName].cleanSheets++ }
+          }
         }
       }
     }
