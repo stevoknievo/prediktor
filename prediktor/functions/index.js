@@ -62,7 +62,9 @@ function normalizeFixture(f) {
     scoreAfterETAway: score?.extratime?.away ?? null,
     scorePenHome: score?.penalty?.home ?? null,
     scorePenAway: score?.penalty?.away ?? null,
-    venue: fixture.venue?.name || null,
+    venue: fixture.venue?.name && fixture.venue?.city
+      ? `${fixture.venue.name}, ${fixture.venue.city}`
+      : fixture.venue?.name || null,
   }
 }
 
