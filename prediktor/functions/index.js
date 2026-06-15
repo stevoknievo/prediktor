@@ -62,6 +62,7 @@ function normalizeFixture(f) {
     scoreAfterETAway: score?.extratime?.away ?? null,
     scorePenHome: score?.penalty?.home ?? null,
     scorePenAway: score?.penalty?.away ?? null,
+    venue: fixture.venue?.name || null,
   }
 }
 
@@ -142,15 +143,12 @@ function scorePlayer(player, playerPreds, tournPred, fixtures, matchEvents, goal
 
   // Partial name matching helper — handles "Vinicius" matching "Vinicius Junior" etc
   function namesMatch(predName, apiName) {
-    const normalise = n => n.toLowerCase().trim()
-      .replace(/\bjr\.?\b/g, 'junior')
-      .replace(/\bst\.?\b/g, 'saint')
-      .replace(/[-']/g, ' ')
-      .replace(/\s+/g, ' ')
-    const p = normalise(predName)
-    const a = normalise(apiName)
+    const p = predName.toLowerCase().trim()
+    const a = apiName.toLowerCase().trim()
     if (p === a) return true
+    // Check if either name contains the other (handles shortened names)
     if (a.includes(p) || p.includes(a)) return true
+    // Check last name match (e.g. "Mbappe" matches "Kylian Mbappe")
     const pParts = p.split(' ')
     const aParts = a.split(' ')
     const pLast = pParts[pParts.length - 1]
@@ -283,7 +281,6 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
         // Update our existing mXXX document with result data
         apiToOurId[f.id] = ourId
         batch.set(db.collection('fixtures').doc(ourId), {
-          date: f.date,
           completed: f.completed,
           status: f.status,
           hasExtraTime: f.hasExtraTime,
