@@ -100,10 +100,14 @@ function calcPlayerStats(matchEvents, goalieTeamMap) {
     for (const team of (events.cleanSheetTeams || [])) {
       for (const [gkNameLower, gkTeam] of Object.entries(goalieTeamMap)) {
         if (gkTeam === team) {
-          // Find the actual GK name from startingGoalkeepers if available
-          const actualName = startingGKNames.find(n => namesMatch(gkNameLower, n)) || gkNameLower
-          const started = startingGKNames.length === 0 || !!actualName
-          if (started) { ensure(actualName); stats[actualName].cleanSheets++ }
+          if (startingGKNames.length === 0) {
+            // No lineup data available — credit the GK
+            ensure(gkNameLower); stats[gkNameLower].cleanSheets++
+          } else {
+            // Only credit if GK actually started
+            const actualName = startingGKNames.find(n => namesMatch(gkNameLower, n))
+            if (actualName) { ensure(actualName); stats[actualName].cleanSheets++ }
+          }
         }
       }
     }
