@@ -585,7 +585,7 @@ exports.generateScoutReport = functions.https.onCall(async (data, context) => {
 // Runs at 2am UTC (3am BST) every day during the tournament
 
 exports.scheduledSync = functions.pubsub
-  .schedule('0 2 * * *')
+  .schedule('0 */2 * * *')
   .timeZone('UTC')
   .onRun(async () => {
     console.log('scheduledSync: starting nightly sync + scoring')
