@@ -79,6 +79,7 @@ function namesMatch(predName, apiName) {
 }
 
 function calcPlayerStats(matchEvents, goalieTeamMap) {
+  // Stats keyed by API player name (original casing)
   const stats = {}
   const ensure = name => { if (!stats[name]) stats[name] = { goals: 0, assists: 0, cleanSheets: 0 } }
   for (const events of Object.values(matchEvents)) {
@@ -86,15 +87,24 @@ function calcPlayerStats(matchEvents, goalieTeamMap) {
     for (const a of (events.assisters || [])) { ensure(a); stats[a].assists++ }
     const startingGKNames = (events.startingGoalkeepers || []).map(g => g.name)
     for (const team of (events.cleanSheetTeams || [])) {
-      for (const [gkName, gkTeam] of Object.entries(goalieTeamMap)) {
+      for (const [gkNameLower, gkTeam] of Object.entries(goalieTeamMap)) {
         if (gkTeam === team) {
-          const started = startingGKNames.length === 0 || startingGKNames.some(n => namesMatch(gkName, n))
-          if (started) { ensure(gkName); stats[gkName].cleanSheets++ }
+          // Find the actual GK name from startingGoalkeepers if available
+          const actualName = startingGKNames.find(n => namesMatch(gkNameLower, n)) || gkNameLower
+          const started = startingGKNames.length === 0 || !!actualName
+          if (started) { ensure(actualName); stats[actualName].cleanSheets++ }
         }
       }
     }
   }
   return stats
+}
+
+function findPlayerStats(name, stats) {
+  // Find stats for a named player using partial matching
+  if (!name || !stats) return null
+  const entry = Object.entries(stats).find(([k]) => namesMatch(name, k))
+  return entry ? entry[1] : null
 }
 
 async function getAllTournamentPredictions() {
@@ -396,8 +406,8 @@ function PlayerCard({ pred, isMe, fixtures, playerStats }) {
             <Section title="Goal Scorers" points="2pts/goal • 15pts Golden Boot">
               {(pred.namedScorers || []).filter(Boolean).length > 0
                 ? (pred.namedScorers || []).filter(Boolean).map((s, i) => {
-                  const match = Object.entries(playerStats).find(([k]) => namesMatch(s, k))
-                  const goals = match ? match[1].goals : 0
+                  const ps = findPlayerStats(s, playerStats)
+                  const goals = ps ? ps.goals : 0
                   const pts = goals * 2
                   return (
                     <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.9rem', marginBottom: '0.25rem' }}>
@@ -413,8 +423,8 @@ function PlayerCard({ pred, isMe, fixtures, playerStats }) {
             <Section title="Assisters" points="2pts/assist • 15pts top assister">
               {(pred.namedAssisters || []).filter(Boolean).length > 0
                 ? (pred.namedAssisters || []).filter(Boolean).map((s, i) => {
-                  const match = Object.entries(playerStats).find(([k]) => namesMatch(s, k))
-                  const assists = match ? match[1].assists : 0
+                  const ps = findPlayerStats(s, playerStats)
+                  const assists = ps ? ps.assists : 0
                   const pts = assists * 2
                   return (
                     <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.9rem', marginBottom: '0.25rem' }}>
@@ -430,8 +440,8 @@ function PlayerCard({ pred, isMe, fixtures, playerStats }) {
             <Section title="Goalkeepers" points="3pts/clean sheet • 15pts top GK">
               {(pred.namedGoalies || []).filter(Boolean).length > 0
                 ? (pred.namedGoalies || []).filter(Boolean).map((s, i) => {
-                  const match = Object.entries(playerStats).find(([k]) => namesMatch(s, k))
-                  const cs = match ? match[1].cleanSheets : 0
+                  const ps = findPlayerStats(s, playerStats)
+                  const cs = ps ? ps.cleanSheets : 0
                   const pts = cs * 3
                   return (
                     <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.9rem', marginBottom: '0.25rem' }}>
