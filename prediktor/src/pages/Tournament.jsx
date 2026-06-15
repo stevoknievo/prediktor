@@ -23,13 +23,21 @@ function namesMatch(predName, apiName) {
     .replace(/\bst\.?\b/g, 'saint')
     .replace(/[-']/g, ' ')
     .replace(/\s+/g, ' ')
-  const p = normalise(predName)
-  const a = normalise(apiName)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  const p = normalise(predName), a = normalise(apiName)
   if (p === a) return true
   if (a.includes(p) || p.includes(a)) return true
   const pParts = p.split(' '), aParts = a.split(' ')
-  const pLast = pParts[pParts.length - 1], aLast = aParts[aParts.length - 1]
+  const pLast = pParts[pParts.length-1], aLast = aParts[aParts.length-1]
   if (pLast.length > 3 && pLast === aLast) return true
+  if (aParts.length === 2 && aParts[0].endsWith('.')) {
+    const apiInitial = aParts[0][0], apiLast = aParts[1]
+    if (pParts.length >= 2 && pParts[0][0] === apiInitial && pParts[pParts.length-1] === apiLast) return true
+  }
+  if (pParts.length === 2 && pParts[0].endsWith('.')) {
+    const predInitial = pParts[0][0], predLast = pParts[1]
+    if (aParts.length >= 2 && aParts[0][0] === predInitial && aParts[aParts.length-1] === predLast) return true
+  }
   return false
 }
 
