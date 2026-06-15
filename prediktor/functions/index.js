@@ -62,9 +62,7 @@ function normalizeFixture(f) {
     scoreAfterETAway: score?.extratime?.away ?? null,
     scorePenHome: score?.penalty?.home ?? null,
     scorePenAway: score?.penalty?.away ?? null,
-    venue: fixture.venue?.name && fixture.venue?.city
-      ? `${fixture.venue.name}, ${fixture.venue.city}`
-      : fixture.venue?.name || null,
+    venue: fixture.venue?.name || null,
   }
 }
 
@@ -327,7 +325,10 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
       try {
         const docId = fixture.ourId || fixture.id
         const existingEvents = await db.collection('matchEvents').doc(docId).get()
-        if (existingEvents.exists) continue
+        // Re-fetch if no events yet, OR if fixture completed recently (within 48h)
+        const fixtureDate = new Date(fixture.date)
+        const hoursSinceCompletion = (Date.now() - fixtureDate.getTime()) / 3600000
+        if (existingEvents.exists && hoursSinceCompletion > 48) continue
 
         const [eventsResult, lineupsResult] = await Promise.all([
           apiFetch(`/fixtures/events?fixture=${fixture.id}`, footballApiKey),
@@ -585,7 +586,7 @@ exports.generateScoutReport = functions.https.onCall(async (data, context) => {
 // Runs at 2am UTC (3am BST) every day during the tournament
 
 exports.scheduledSync = functions.pubsub
-  .schedule('0 */2 * * *')
+  .schedule('0 2 * * *')
   .timeZone('UTC')
   .onRun(async () => {
     console.log('scheduledSync: starting nightly sync + scoring')
@@ -624,7 +625,10 @@ exports.scheduledSync = functions.pubsub
       for (const fixture of completedFixtures) {
         try {
           const existing = await db.collection('matchEvents').doc(fixture.id).get()
-          if (existing.exists) continue
+          // Re-fetch if no events yet, OR if fixture completed recently (within 48h)
+          const fixtureDate = new Date(fixture.date)
+          const hoursSinceCompletion = (Date.now() - fixtureDate.getTime()) / 3600000
+          if (existing.exists && hoursSinceCompletion > 48) continue
 
           const [eventsResult, lineupsResult] = await Promise.all([
             apiFetch(`/fixtures/events?fixture=${fixture.id}`, footballApiKey),
