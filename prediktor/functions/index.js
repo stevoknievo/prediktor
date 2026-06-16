@@ -272,11 +272,13 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
 
     // Load our seeded fixtures to build a team-name -> mXXX ID lookup
     const seededSnap = await db.collection('fixtures').get()
-    const teamLookup = {} // "HomeTeam|AwayTeam" -> mXXX doc ID
+    // Sort team names alphabetically so home/away order doesn't matter
+    const teamLookup = {} // "TeamA|TeamB" (sorted) -> mXXX doc ID
     seededSnap.docs.forEach(d => {
       const data = d.data()
       if (d.id.startsWith('m') && data.homeTeam && data.awayTeam) {
-        teamLookup[`${data.homeTeam}|${data.awayTeam}`] = d.id
+        const key = [data.homeTeam, data.awayTeam].sort().join('|')
+        teamLookup[key] = d.id
       }
     })
 
@@ -284,7 +286,7 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
     const apiToOurId = {} // API numeric ID -> our mXXX ID
 
     for (const f of fixtures) {
-      const key = `${f.homeTeam}|${f.awayTeam}`
+      const key = [f.homeTeam, f.awayTeam].sort().join('|')
       const ourId = teamLookup[key]
       if (ourId) {
         // Update our existing mXXX document with result data
