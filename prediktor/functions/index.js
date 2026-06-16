@@ -166,8 +166,9 @@ function scorePlayer(player, playerPreds, tournPred, fixtures, matchEvents, goal
     return false
   }
 
-  // Named player stats per match
-  for (const events of Object.values(matchEvents)) {
+  // Named player stats per match — only process mXXX documents to prevent double-counting
+  for (const [eventId, events] of Object.entries(matchEvents)) {
+    if (!eventId.startsWith('m')) continue  // skip any stale numeric documents
     for (const scorer of (events.goalScorers || [])) {
       if (namedScorers.some(n => namesMatch(n, scorer))) {
         total += 2; breakdown.push(`+2 goal: ${scorer}`)
