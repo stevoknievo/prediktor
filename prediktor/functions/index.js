@@ -613,20 +613,60 @@ exports.scheduledSync = functions.pubsub
       }
 
       const fixtures = result.response.map(normalizeFixture)
+
+      // Build sorted team name lookup to match API fixtures to mXXX IDs
+      const seededSnap = await db.collection('fixtures').get()
+      const teamLookup = {}
+      seededSnap.docs.forEach(d => {
+        const data = d.data()
+        if (d.id.startsWith('m') && data.homeTeam && data.awayTeam) {
+          const key = [data.homeTeam, data.awayTeam].sort().join('|')
+          teamLookup[key] = d.id
+        }
+      })
+
       const batch = db.batch()
+      const apiToOurId = {}
       for (const f of fixtures) {
-        batch.set(db.collection('fixtures').doc(f.id), f, { merge: true })
+        const key = [f.homeTeam, f.awayTeam].sort().join('|')
+        const ourId = teamLookup[key]
+        if (ourId) {
+          apiToOurId[f.id] = ourId
+          batch.set(db.collection('fixtures').doc(ourId), {
+            date: f.date,
+            venue: f.venue,
+            completed: f.completed,
+            status: f.status,
+            hasExtraTime: f.hasExtraTime,
+            hasPenalties: f.hasPenalties,
+            score90Home: f.score90Home,
+            score90Away: f.score90Away,
+            scoreAfterETHome: f.scoreAfterETHome,
+            scoreAfterETAway: f.scoreAfterETAway,
+            scorePenHome: f.scorePenHome,
+            scorePenAway: f.scorePenAway,
+            homeLogo: f.homeLogo,
+            awayLogo: f.awayLogo,
+            homeTeamCode: f.homeTeamCode,
+            awayTeamCode: f.awayTeamCode,
+            apiFixtureId: f.id,
+          }, { merge: true })
+        } else {
+          console.warn(`scheduledSync: no mXXX match for ${f.homeTeam} vs ${f.awayTeam}`)
+        }
       }
       await batch.commit()
       console.log(`scheduledSync: synced ${fixtures.length} fixtures`)
 
-      // Fetch events for newly completed fixtures
-      const completedFixtures = fixtures.filter(f => f.completed)
+      // Fetch events for newly completed fixtures (using mXXX IDs)
+      const completedFixtures = fixtures.filter(f => f.completed && apiToOurId[f.id])
+        .map(f => ({ ...f, ourId: apiToOurId[f.id] }))
       let eventsUpdated = 0
 
       for (const fixture of completedFixtures) {
         try {
-          const existing = await db.collection('matchEvents').doc(fixture.id).get()
+          const docId = fixture.ourId
+          const existing = await db.collection('matchEvents').doc(docId).get()
           // Re-fetch if no events yet, OR if fixture completed recently (within 48h)
           const fixtureDate = new Date(fixture.date)
           const hoursSinceCompletion = (Date.now() - fixtureDate.getTime()) / 3600000
@@ -676,8 +716,8 @@ exports.scheduledSync = functions.pubsub
           if (fixture.score90Home === 0) cleanSheetTeams.push(fixture.awayTeam)
           if (fixture.score90Away === 0) cleanSheetTeams.push(fixture.homeTeam)
 
-          await db.collection('matchEvents').doc(fixture.id).set({
-            fixtureId: fixture.id,
+          await db.collection('matchEvents').doc(docId).set({
+            fixtureId: docId,
             homeTeam: fixture.homeTeam,
             awayTeam: fixture.awayTeam,
             date: fixture.date,
