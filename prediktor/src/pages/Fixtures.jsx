@@ -35,12 +35,8 @@ const R16_TO_QF = {
 const QF_TO_SF = {
   'm101': ['m097','m098'], 'm102': ['m099','m100'],
 }
-const SF_TO_FINAL = {
-  'm104': ['m101','m102'],
-}
-const SF_TO_3RD = {
-  'm103': ['m101','m102'],
-}
+const SF_TO_FINAL = { 'm104': ['m101','m102'] }
+const SF_TO_3RD = { 'm103': ['m101','m102'] }
 
 function groupByStage(fixtures) {
   return fixtures.reduce((acc, f) => {
@@ -51,69 +47,59 @@ function groupByStage(fixtures) {
   }, {})
 }
 
-// Calculate points earned from a single completed fixture
 function calcMatchPoints(fixture, pred, matchEvents, tournamentPred) {
   if (!fixture?.completed || !pred) return { total: 0, breakdown: [] }
   const breakdown = []
   let total = 0
 
-  const h90 = Number(pred.score90Home)
-  const a90 = Number(pred.score90Away)
-  const actH90 = Number(fixture.score90Home)
-  const actA90 = Number(fixture.score90Away)
+  const h90 = Number(pred.score90Home), a90 = Number(pred.score90Away)
+  const actH90 = Number(fixture.score90Home), actA90 = Number(fixture.score90Away)
 
   if (!isNaN(h90) && !isNaN(a90) && !isNaN(actH90) && !isNaN(actA90)) {
     const predResult = h90 > a90 ? 'h' : a90 > h90 ? 'a' : 'd'
     const actResult = actH90 > actA90 ? 'h' : actA90 > actH90 ? 'a' : 'd'
-    if (predResult === actResult) { total += 3; breakdown.push('✓ Correct result +3') }
-    if (h90 === actH90 && a90 === actA90) { total += 3; breakdown.push('✓ Correct score +3') }
+    const correctScore = h90 === actH90 && a90 === actA90
+    if (correctScore) {
+      total += 6; breakdown.push('✓ Correct score +6')
+    } else if (predResult === actResult) {
+      total += 3; breakdown.push('✓ Correct result +3')
+    }
   }
 
-  if (fixture.hasExtraTime && pred.scoreETHome !== undefined) {
+  if (fixture.hasExtraTime && pred.scoreETHome !== undefined && pred.scoreETHome !== '') {
     const hET = Number(pred.scoreETHome), aET = Number(pred.scoreETAway)
     const actHET = Number(fixture.scoreAfterETHome), actAET = Number(fixture.scoreAfterETAway)
     if (!isNaN(hET) && !isNaN(aET) && !isNaN(actHET) && !isNaN(actAET)) {
-      const predResET = hET > aET ? 'h' : aET > hET ? 'a' : 'd'
-      const actResET = actHET > actAET ? 'h' : actAET > actHET ? 'a' : 'd'
-      if (predResET === actResET) { total += 2; breakdown.push('✓ Correct ET result +2') }
-      if (hET === actHET && aET === actAET) { total += 2; breakdown.push('✓ Correct ET score +2') }
+      if (hET === actHET && aET === actAET) { total += 4; breakdown.push('✓ Correct ET score +4') }
+      else if ((hET > aET ? 'h' : aET > hET ? 'a' : 'd') === (actHET > actAET ? 'h' : actAET > actHET ? 'a' : 'd')) {
+        total += 2; breakdown.push('✓ Correct ET result +2')
+      }
     }
   }
 
-  if (fixture.hasPenalties && pred.scorePenHome !== undefined) {
+  if (fixture.hasPenalties && pred.scorePenHome !== undefined && pred.scorePenHome !== '') {
     const hPen = Number(pred.scorePenHome), aPen = Number(pred.scorePenAway)
     const actHPen = Number(fixture.scorePenHome), actAPen = Number(fixture.scorePenAway)
     if (!isNaN(hPen) && !isNaN(aPen) && !isNaN(actHPen) && !isNaN(actAPen)) {
-      const predPenW = hPen > aPen ? 'h' : 'a'
-      const actPenW = actHPen > actAPen ? 'h' : 'a'
-      if (predPenW === actPenW) { total += 3; breakdown.push('✓ Correct shootout result +3') }
-      if (hPen === actHPen && aPen === actAPen) { total += 3; breakdown.push('✓ Correct shootout score +3') }
+      if (hPen === actHPen && aPen === actAPen) { total += 6; breakdown.push('✓ Correct shootout score +6') }
+      else if ((hPen > aPen ? 'h' : 'a') === (actHPen > actAPen ? 'h' : 'a')) {
+        total += 3; breakdown.push('✓ Correct shootout result +3')
+      }
     }
   }
 
-  // Named player points from match events
   if (matchEvents && tournamentPred) {
     const namedScorers = (tournamentPred.namedScorers || []).filter(Boolean).map(n => n.toLowerCase())
     const namedAssisters = (tournamentPred.namedAssisters || []).filter(Boolean).map(n => n.toLowerCase())
-    const namedGoalies = (tournamentPred.namedGoalies || []).filter(Boolean).map(n => n.toLowerCase())
-
     for (const scorer of (matchEvents.goalScorers || [])) {
-      if (namedScorers.includes(scorer.toLowerCase())) {
-        total += 2
-        breakdown.push(`⚽ ${scorer} goal +2`)
+      if (namedScorers.some(n => scorer.toLowerCase().includes(n) || n.includes(scorer.toLowerCase()))) {
+        total += 2; breakdown.push(`⚽ ${scorer} goal +2`)
       }
     }
     for (const assister of (matchEvents.assisters || [])) {
-      if (namedAssisters.includes(assister.toLowerCase())) {
-        total += 1
-        breakdown.push(`🎯 ${assister} assist +1`)
+      if (namedAssisters.some(n => assister.toLowerCase().includes(n) || n.includes(assister.toLowerCase()))) {
+        total += 2; breakdown.push(`🎯 ${assister} assist +2`)
       }
-    }
-    for (const team of (matchEvents.cleanSheetTeams || [])) {
-      // Match goalie to clean sheet team via fixture
-      // We check if named goalie's team kept a clean sheet
-      // Since we don't have goalie->team map here, we show clean sheet info
-      // and trust the server-side scoring for the actual points
     }
   }
 
@@ -195,7 +181,6 @@ function FixtureRow({ fixture, prediction, onSave, locked, matchEvents, tourname
     ? `${fixture.score90Home}-${fixture.score90Away}${fixture.hasExtraTime ? ' (AET)' : ''}${fixture.hasPenalties ? ` (${fixture.scorePenHome}-${fixture.scorePenAway} pens)` : ''}`
     : null
 
-  // Points for this match
   const { total: matchPoints, breakdown } = actual && prediction
     ? calcMatchPoints(fixture, prediction, matchEvents, tournamentPred)
     : { total: 0, breakdown: [] }
@@ -220,14 +205,11 @@ function FixtureRow({ fixture, prediction, onSave, locked, matchEvents, tourname
             <button
               onClick={() => setShowBreakdown(b => !b)}
               style={{
-                fontFamily: 'var(--font-display)',
-                fontSize: '0.78rem',
-                padding: '0.2rem 0.6rem',
-                borderRadius: '999px',
+                fontFamily: 'var(--font-display)', fontSize: '0.78rem',
+                padding: '0.2rem 0.6rem', borderRadius: '999px',
                 border: `1px solid ${matchPoints > 0 ? 'var(--gold)' : 'var(--border)'}`,
                 background: matchPoints > 0 ? 'rgba(245,200,66,0.12)' : 'transparent',
-                color: matchPoints > 0 ? 'var(--gold)' : 'var(--muted)',
-                cursor: 'pointer',
+                color: matchPoints > 0 ? 'var(--gold)' : 'var(--muted)', cursor: 'pointer',
               }}
             >
               {matchPoints > 0 ? `+${matchPoints} pts` : '0 pts'}
@@ -305,13 +287,8 @@ function FixtureRow({ fixture, prediction, onSave, locked, matchEvents, tourname
         </div>
       )}
 
-      {/* Points breakdown panel */}
       {showBreakdown && actual && hasPrediction && (
-        <div style={{
-          marginTop: '0.75rem', paddingTop: '0.75rem',
-          borderTop: '1px solid var(--border)',
-          fontSize: '0.78rem',
-        }}>
+        <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border)', fontSize: '0.78rem' }}>
           {breakdown.length > 0 ? (
             breakdown.map((line, i) => (
               <div key={i} style={{ color: 'var(--gold)', marginBottom: '0.2rem' }}>{line}</div>
@@ -319,17 +296,11 @@ function FixtureRow({ fixture, prediction, onSave, locked, matchEvents, tourname
           ) : (
             <div style={{ color: 'var(--muted)' }}>No points from this match</div>
           )}
-          {matchEvents && (matchEvents.goalScorers?.length > 0 || matchEvents.assisters?.length > 0) && (
+          {matchEvents && (matchEvents.goalScorers?.length > 0 || matchEvents.assisters?.length > 0 || matchEvents.cleanSheetTeams?.length > 0) && (
             <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border)', color: 'var(--muted)' }}>
-              {matchEvents.goalScorers?.length > 0 && (
-                <div>⚽ Goals: {matchEvents.goalScorers.join(', ')}</div>
-              )}
-              {matchEvents.assisters?.length > 0 && (
-                <div>🎯 Assists: {matchEvents.assisters.join(', ')}</div>
-              )}
-              {matchEvents.cleanSheetTeams?.length > 0 && (
-                <div>🧤 Clean sheet: {matchEvents.cleanSheetTeams.join(', ')}</div>
-              )}
+              {matchEvents.goalScorers?.length > 0 && <div>⚽ Goals: {matchEvents.goalScorers.join(', ')}</div>}
+              {matchEvents.assisters?.length > 0 && <div>🎯 Assists: {matchEvents.assisters.join(', ')}</div>}
+              {matchEvents.cleanSheetTeams?.length > 0 && <div>🧤 Clean sheet: {matchEvents.cleanSheetTeams.join(', ')}</div>}
             </div>
           )}
         </div>
@@ -345,6 +316,7 @@ export default function Fixtures({ playerId }) {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
   const [stageFilter, setStageFilter] = useState('all')
+  const [sortOrder, setSortOrder] = useState('stage') // 'stage' | 'date'
   const [isUnlocked, setIsUnlocked] = useState(false)
   const [matchEvents, setMatchEvents] = useState({})
   const [tournamentPred, setTournamentPred] = useState(null)
@@ -358,7 +330,6 @@ export default function Fixtures({ playerId }) {
       preds.forEach(p => { map[p.fixtureId] = p })
       setPredictions(map)
     })
-    // Load tournament predictions for named player scoring
     getDoc(doc(db, 'tournamentPredictions', playerId)).then(snap => {
       if (snap.exists()) setTournamentPred(snap.data())
     })
@@ -376,7 +347,6 @@ export default function Fixtures({ playerId }) {
     })
   }, [playerId])
 
-  // Load match events for completed fixtures
   useEffect(() => {
     getDocs(collection(db, 'matchEvents')).then(snap => {
       const eventsMap = {}
@@ -417,64 +387,32 @@ export default function Fixtures({ playerId }) {
   try {
     const r32 = generateRoundOf32(fixturesMap, predictions)
     r32.forEach(r => {
-      if (resolvedTeams[r.id]) {
-        resolvedTeams[r.id] = { ...resolvedTeams[r.id], homeTeam: r.homeTeam, awayTeam: r.awayTeam }
-      }
+      if (resolvedTeams[r.id]) resolvedTeams[r.id] = { ...resolvedTeams[r.id], homeTeam: r.homeTeam, awayTeam: r.awayTeam }
     })
   } catch (e) {}
 
   Object.entries(R32_TO_R16).forEach(([r16id, [fid1, fid2]]) => {
-    const home = getWinner(fid1, resolvedTeams)
-    const away = getWinner(fid2, resolvedTeams)
-    if (resolvedTeams[r16id]) {
-      resolvedTeams[r16id] = { ...resolvedTeams[r16id], homeTeam: home || 'TBD', awayTeam: away || 'TBD' }
-    }
+    const home = getWinner(fid1, resolvedTeams), away = getWinner(fid2, resolvedTeams)
+    if (resolvedTeams[r16id]) resolvedTeams[r16id] = { ...resolvedTeams[r16id], homeTeam: home || 'TBD', awayTeam: away || 'TBD' }
   })
-
   Object.entries(R16_TO_QF).forEach(([qfid, [fid1, fid2]]) => {
-    const home = getWinner(fid1, resolvedTeams)
-    const away = getWinner(fid2, resolvedTeams)
-    if (resolvedTeams[qfid]) {
-      resolvedTeams[qfid] = { ...resolvedTeams[qfid], homeTeam: home || 'TBD', awayTeam: away || 'TBD' }
-    }
+    const home = getWinner(fid1, resolvedTeams), away = getWinner(fid2, resolvedTeams)
+    if (resolvedTeams[qfid]) resolvedTeams[qfid] = { ...resolvedTeams[qfid], homeTeam: home || 'TBD', awayTeam: away || 'TBD' }
   })
-
   Object.entries(QF_TO_SF).forEach(([sfid, [fid1, fid2]]) => {
-    const home = getWinner(fid1, resolvedTeams)
-    const away = getWinner(fid2, resolvedTeams)
-    if (resolvedTeams[sfid]) {
-      resolvedTeams[sfid] = { ...resolvedTeams[sfid], homeTeam: home || 'TBD', awayTeam: away || 'TBD' }
-    }
+    const home = getWinner(fid1, resolvedTeams), away = getWinner(fid2, resolvedTeams)
+    if (resolvedTeams[sfid]) resolvedTeams[sfid] = { ...resolvedTeams[sfid], homeTeam: home || 'TBD', awayTeam: away || 'TBD' }
   })
-
   Object.entries(SF_TO_FINAL).forEach(([fid, [sf1, sf2]]) => {
-    const home = getWinner(sf1, resolvedTeams)
-    const away = getWinner(sf2, resolvedTeams)
-    if (resolvedTeams[fid]) {
-      resolvedTeams[fid] = { ...resolvedTeams[fid], homeTeam: home || 'TBD', awayTeam: away || 'TBD' }
-    }
+    const home = getWinner(sf1, resolvedTeams), away = getWinner(sf2, resolvedTeams)
+    if (resolvedTeams[fid]) resolvedTeams[fid] = { ...resolvedTeams[fid], homeTeam: home || 'TBD', awayTeam: away || 'TBD' }
   })
-
   Object.entries(SF_TO_3RD).forEach(([fid, [sf1, sf2]]) => {
-    const home = getLoser(sf1, resolvedTeams)
-    const away = getLoser(sf2, resolvedTeams)
-    if (resolvedTeams[fid]) {
-      resolvedTeams[fid] = { ...resolvedTeams[fid], homeTeam: home || 'TBD', awayTeam: away || 'TBD' }
-    }
+    const home = getLoser(sf1, resolvedTeams), away = getLoser(sf2, resolvedTeams)
+    if (resolvedTeams[fid]) resolvedTeams[fid] = { ...resolvedTeams[fid], homeTeam: home || 'TBD', awayTeam: away || 'TBD' }
   })
 
   const allResolved = Object.values(resolvedTeams)
-  const grouped = groupByStage(allResolved)
-  const sortedStages = Object.keys(grouped).sort((a, b) => {
-    const ai = STAGE_ORDER.indexOf(a), bi = STAGE_ORDER.indexOf(b)
-    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
-  })
-
-  const groupStages = sortedStages.filter(s => !KNOCKOUT_STAGES.includes(s))
-  const knockoutStages = sortedStages.filter(s => KNOCKOUT_STAGES.includes(s))
-  const visibleStages = stageFilter === 'group' ? groupStages
-    : stageFilter === 'knockout' ? knockoutStages
-    : sortedStages
 
   const groupFixtureIds = Object.values(GROUP_FIXTURES).flat()
   const predictedCount = groupFixtureIds.filter(fid => {
@@ -482,7 +420,6 @@ export default function Fixtures({ playerId }) {
     return p && p.score90Home !== undefined && p.score90Home !== ''
   }).length
 
-  // Total points across all completed fixtures
   const totalMatchPoints = Object.entries(predictions).reduce((sum, [fixtureId, pred]) => {
     const fixture = fixturesMap[fixtureId]
     if (!fixture?.completed) return sum
@@ -491,6 +428,35 @@ export default function Fixtures({ playerId }) {
   }, 0)
 
   if (loading) return <div className="page"><div className="spinner" /></div>
+
+  // ── Render: two display modes ─────────────────────────────────────────
+
+  const applyFilter = (fixtures) => fixtures.filter(f => {
+    if (filter === 'upcoming') return !f.completed
+    if (filter === 'predicted') return predictions[f.id]
+    return true
+  })
+
+  // Stage view (default)
+  const grouped = groupByStage(allResolved)
+  const sortedStages = Object.keys(grouped).sort((a, b) => {
+    const ai = STAGE_ORDER.indexOf(a), bi = STAGE_ORDER.indexOf(b)
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
+  })
+  const groupStages = sortedStages.filter(s => !KNOCKOUT_STAGES.includes(s))
+  const knockoutStages = sortedStages.filter(s => KNOCKOUT_STAGES.includes(s))
+  const visibleStages = stageFilter === 'group' ? groupStages
+    : stageFilter === 'knockout' ? knockoutStages
+    : sortedStages
+
+  // Chronological view
+  const chronoFixtures = applyFilter(
+    [...allResolved].filter(f => {
+      if (stageFilter === 'group') return !KNOCKOUT_STAGES.includes(f.stage)
+      if (stageFilter === 'knockout') return KNOCKOUT_STAGES.includes(f.stage)
+      return true
+    }).sort((a, b) => new Date(a.date) - new Date(b.date))
+  )
 
   return (
     <div className="page">
@@ -529,6 +495,7 @@ export default function Fixtures({ playerId }) {
         </div>
       )}
 
+      {/* Filter row */}
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
         {[['all','All'],['group','Groups'],['knockout','⚔️ Knockouts']].map(([val, label]) => (
           <button key={val} className="btn btn-ghost"
@@ -537,26 +504,50 @@ export default function Fixtures({ playerId }) {
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
+      {/* Second row: status filter + sort toggle */}
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
         {['all','upcoming','predicted'].map(f => (
           <button key={f} className="btn btn-ghost"
             style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem', ...(filter === f ? { borderColor: 'var(--cyan)', color: 'var(--cyan)' } : {}) }}
             onClick={() => setFilter(f)}>{f.charAt(0).toUpperCase() + f.slice(1)}</button>
         ))}
+        <button
+          className="btn btn-ghost"
+          style={{ fontSize: '0.78rem', padding: '0.3rem 0.75rem', marginLeft: 'auto', ...(sortOrder === 'date' ? { borderColor: 'var(--cyan)', color: 'var(--cyan)' } : {}) }}
+          onClick={() => setSortOrder(s => s === 'stage' ? 'date' : 'stage')}
+        >
+          {sortOrder === 'stage' ? '📅 By date' : '📋 By group'}
+        </button>
       </div>
 
       {allResolved.length === 0 && (
         <div className="card" style={{ textAlign: 'center', padding: '3rem' }}><p>No fixtures loaded yet.</p></div>
       )}
 
-      {visibleStages.map((stage, idx) => {
+      {/* Chronological view */}
+      {sortOrder === 'date' && (
+        <div>
+          {chronoFixtures.length === 0 ? (
+            <div className="card" style={{ textAlign: 'center', padding: '2rem' }}><p>No fixtures match this filter.</p></div>
+          ) : chronoFixtures.map(f => (
+            <FixtureRow
+              key={f.id}
+              fixture={f}
+              prediction={predictions[f.id]}
+              onSave={handleSave}
+              locked={isLocked || f.completed}
+              matchEvents={matchEvents[f.id]}
+              tournamentPred={tournamentPred}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Stage view */}
+      {sortOrder === 'stage' && visibleStages.map((stage, idx) => {
         const isKnockoutStage = KNOCKOUT_STAGES.includes(stage)
         const stageFixtures = grouped[stage] || []
-        const visible = stageFixtures.filter(f => {
-          if (filter === 'upcoming') return !f.completed
-          if (filter === 'predicted') return predictions[f.id]
-          return true
-        })
+        const visible = applyFilter(stageFixtures)
         if (visible.length === 0) return null
 
         const prevStage = visibleStages[idx - 1]
