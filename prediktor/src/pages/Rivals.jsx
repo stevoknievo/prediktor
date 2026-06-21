@@ -101,12 +101,11 @@ function calcPlayerStats(matchEvents, goalieTeamMap) {
       for (const [gkNameLower, gkTeam] of Object.entries(goalieTeamMap)) {
         if (gkTeam === team) {
           if (startingGKNames.length === 0) {
-            // No lineup data available — credit the GK
             ensure(gkNameLower); stats[gkNameLower].cleanSheets++
           } else {
-            // Only credit if GK actually started
-            const actualName = startingGKNames.find(n => namesMatch(gkNameLower, n))
-            if (actualName) { ensure(actualName); stats[actualName].cleanSheets++ }
+            // Always store under squad name (gkNameLower) for consistent lookup
+            const started = startingGKNames.some(n => namesMatch(gkNameLower, n))
+            if (started) { ensure(gkNameLower); stats[gkNameLower].cleanSheets++ }
           }
         }
       }
