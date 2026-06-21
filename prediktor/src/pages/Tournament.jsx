@@ -55,8 +55,9 @@ function calcPlayerStats(matchEvents, goalieTeamMap) {
           if (startingGKNames.length === 0) {
             ensure(gkName); stats[gkName].cleanSheets++
           } else {
-            const actualName = startingGKNames.find(n => namesMatch(gkName, n))
-            if (actualName) { ensure(actualName); stats[actualName].cleanSheets++ }
+            // Check if this GK started — always store under squad name (gkName) for consistent lookup
+            const started = startingGKNames.some(n => namesMatch(gkName, n))
+            if (started) { ensure(gkName); stats[gkName].cleanSheets++ }
           }
         }
       }
