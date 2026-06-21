@@ -211,18 +211,18 @@ export default function Tournament({ playerId }) {
       const eventsMap = {}
       eventsSnap.docs.forEach(d => { eventsMap[d.id] = d.data() })
       setLoading(false)
-      // Defer stats calc until goalieTeamMap is available
       setPlayerStats({ _events: eventsMap })
     })
   }, [playerId])
 
   // Recalculate stats when both events and goalieTeamMap are available
+  // goalieTeamMap is populated by the squads useEffect which may run after this one
   useEffect(() => {
-    if (playerStats._events && Object.keys(goalieTeamMap).length > 0) {
-      const stats = calcPlayerStats(playerStats._events, goalieTeamMap)
-      setPlayerStats(stats)
-    }
-  }, [playerStats._events, goalieTeamMap])
+    if (!playerStats._events) return
+    // Always recalc — if goalieTeamMap is empty, clean sheets just won't show yet
+    const stats = calcPlayerStats(playerStats._events, goalieTeamMap)
+    setPlayerStats(stats)
+  }, [playerStats._events, JSON.stringify(goalieTeamMap)])
 
   async function handleSave() {
     if (isLocked) return
@@ -236,7 +236,7 @@ export default function Tournament({ playerId }) {
 
   const outfieldPlayers = allPlayers.length > 0 ? allPlayers : []
   const gkPlayers = goalkeepers.length > 0 ? goalkeepers : []
-  const stats = playerStats._events ? {} : playerStats // use empty if still loading
+  const stats = (playerStats && !playerStats._events) ? playerStats : {} // use empty while loading
 
   return (
     <div className="page">
