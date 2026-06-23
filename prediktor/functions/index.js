@@ -305,10 +305,6 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
           scoreAfterETAway: f.scoreAfterETAway,
           scorePenHome: f.scorePenHome,
           scorePenAway: f.scorePenAway,
-          homeLogo: f.homeLogo,
-          awayLogo: f.awayLogo,
-          homeTeamCode: f.homeTeamCode,
-          awayTeamCode: f.awayTeamCode,
           apiFixtureId: f.id,
         }, { merge: true })
       } else {
@@ -665,10 +661,6 @@ exports.scheduledSync = functions.pubsub
             scoreAfterETAway: f.scoreAfterETAway,
             scorePenHome: f.scorePenHome,
             scorePenAway: f.scorePenAway,
-            homeLogo: f.homeLogo,
-            awayLogo: f.awayLogo,
-            homeTeamCode: f.homeTeamCode,
-            awayTeamCode: f.awayTeamCode,
             apiFixtureId: f.id,
           }, { merge: true })
         } else {
