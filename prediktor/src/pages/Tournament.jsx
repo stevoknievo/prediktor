@@ -50,13 +50,19 @@ function calcPlayerStats(matchEvents, goalieTeamMap) {
     .replace(/jr\.?/g, 'junior').replace(/[-']/g, ' ').replace(/\s+/g, ' ')
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
 
+  const getKey = name => {
+    const norm = normName(name)
+    const existing = Object.keys(stats).find(k => k === norm || namesMatch(name, k))
+    return existing || norm
+  }
+
   for (const events of Object.values(matchEvents)) {
     for (const s of (events.goalScorers || [])) {
-      const key = normName(s)
+      const key = getKey(s)
       ensure(key); stats[key].goals++
     }
     for (const a of (events.assisters || [])) {
-      const key = normName(a)
+      const key = getKey(a)
       ensure(key); stats[key].assists++
     }
     const startingGKNames = (events.startingGoalkeepers || []).map(g => g.name)
