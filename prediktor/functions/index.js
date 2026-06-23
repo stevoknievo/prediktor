@@ -154,7 +154,7 @@ function scorePlayer(player, playerPreds, tournPred, fixtures, matchEvents, goal
     if (a.includes(p) || p.includes(a)) return true
     const pParts = p.split(' '), aParts = a.split(' ')
     const pLast = pParts[pParts.length-1], aLast = aParts[aParts.length-1]
-    if (pLast.length > 3 && pLast === aLast) return true
+    if (pLast.length > 5 && pLast === aLast) return true  // min 6 chars to avoid false positives
     if (aParts.length === 2 && aParts[0].endsWith('.')) {
       const apiInitial = aParts[0][0], apiLast = aParts[1]
       if (pParts.length >= 2 && pParts[0][0] === apiInitial && pParts[pParts.length-1] === apiLast) return true
@@ -317,6 +317,18 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
     }
     await batch.commit()
 
+    // Safety net: delete any numeric fixture documents
+    const allFixSnap = await db.collection('fixtures').get()
+    const cleanBatch = db.batch()
+    let numCount = 0
+    allFixSnap.docs.forEach(d => {
+      if (!d.id.startsWith('m')) { cleanBatch.delete(db.collection('fixtures').doc(d.id)); numCount++ }
+    })
+    if (numCount > 0) {
+      await cleanBatch.commit()
+      console.warn(`syncFixtures: deleted ${numCount} stale numeric fixture documents`)
+    }
+
     // Use our mXXX IDs for events, filter to completed fixtures that have a mapping
     const completedFixtures = fixtures.filter(f => f.completed && apiToOurId[f.id]).map(f => ({
       ...f,
@@ -341,8 +353,15 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
 
         const events = eventsResult.response
         const goalScorers = [], assisters = [], yellowCards = [], redCards = []
+        // Track unique event IDs to prevent duplicate entries from API
+        const seenEventIds = new Set()
 
         for (const e of events) {
+          // Skip duplicate events (same time + player + type)
+          const eventKey = `${e.time?.elapsed}_${e.player?.name}_${e.type}_${e.detail}`
+          if (seenEventIds.has(eventKey)) continue
+          seenEventIds.add(eventKey)
+
           if (e.type === 'Goal' && e.detail !== 'Own Goal') {
             if (e.player?.name) goalScorers.push(e.player.name)
             if (e.assist?.name) assisters.push(e.assist.name)
@@ -657,6 +676,22 @@ exports.scheduledSync = functions.pubsub
         }
       }
       await batch.commit()
+
+      // Safety net: delete any numeric fixture documents that may exist
+      const allFixturesSnap = await db.collection('fixtures').get()
+      const cleanupBatch = db.batch()
+      let numericCount = 0
+      allFixturesSnap.docs.forEach(d => {
+        if (!d.id.startsWith('m')) {
+          cleanupBatch.delete(db.collection('fixtures').doc(d.id))
+          numericCount++
+        }
+      })
+      if (numericCount > 0) {
+        await cleanupBatch.commit()
+        console.log(`scheduledSync: deleted ${numericCount} stale numeric fixture documents`)
+      }
+
       console.log(`scheduledSync: synced ${fixtures.length} fixtures`)
 
       // Fetch events for newly completed fixtures (using mXXX IDs)
@@ -681,8 +716,13 @@ exports.scheduledSync = functions.pubsub
 
           const events = eventsResult.response
           const goalScorers = [], assisters = [], yellowCards = [], redCards = []
+          const seenEventIds = new Set()
 
           for (const e of events) {
+            const eventKey = `${e.time?.elapsed}_${e.player?.name}_${e.type}_${e.detail}`
+            if (seenEventIds.has(eventKey)) continue
+            seenEventIds.add(eventKey)
+
             if (e.type === 'Goal' && e.detail !== 'Own Goal') {
               if (e.player?.name) goalScorers.push(e.player.name)
               if (e.assist?.name) assisters.push(e.assist.name)
