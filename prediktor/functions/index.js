@@ -350,15 +350,15 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
         const events = eventsResult.response
         const goalScorers = [], assisters = [], yellowCards = [], redCards = []
         // Track unique event IDs to prevent duplicate entries from API
-        const seenEventIds = new Set()
+        const seenEvents = new Set()
 
         for (const e of events) {
-          // Skip duplicate events (same time + player + type)
-          const eventKey = `${e.time?.elapsed}_${e.player?.name}_${e.type}_${e.detail}`
-          if (seenEventIds.has(eventKey)) continue
-          seenEventIds.add(eventKey)
+          const elapsed = e.time?.elapsed ?? e.time?.extra ?? 0
+          const eventKey = `${e.player?.name}_${e.type}_${e.detail}_${elapsed}`
+          if (seenEvents.has(eventKey)) continue
+          seenEvents.add(eventKey)
 
-          if (e.type === 'Goal' && e.detail !== 'Own Goal') {
+          if (e.type === 'Goal' && e.detail !== 'Own Goal' && e.detail !== 'Missed Penalty') {
             if (e.player?.name) goalScorers.push(e.player.name)
             if (e.assist?.name) assisters.push(e.assist.name)
           }
@@ -708,14 +708,19 @@ exports.scheduledSync = functions.pubsub
 
           const events = eventsResult.response
           const goalScorers = [], assisters = [], yellowCards = [], redCards = []
-          const seenEventIds = new Set()
+          // Deduplicate by counting expected goals per player from score
+          // and by tracking unique player+minute combinations
+          const seenEvents = new Set()
 
           for (const e of events) {
-            const eventKey = `${e.time?.elapsed}_${e.player?.name}_${e.type}_${e.detail}`
-            if (seenEventIds.has(eventKey)) continue
-            seenEventIds.add(eventKey)
+            // Use player name + type + elapsed minutes as unique key
+            // Allow same player to score at different minutes
+            const elapsed = e.time?.elapsed ?? e.time?.extra ?? 0
+            const eventKey = `${e.player?.name}_${e.type}_${e.detail}_${elapsed}`
+            if (seenEvents.has(eventKey)) continue
+            seenEvents.add(eventKey)
 
-            if (e.type === 'Goal' && e.detail !== 'Own Goal') {
+            if (e.type === 'Goal' && e.detail !== 'Own Goal' && e.detail !== 'Missed Penalty') {
               if (e.player?.name) goalScorers.push(e.player.name)
               if (e.assist?.name) assisters.push(e.assist.name)
             }
