@@ -45,9 +45,20 @@ function calcPlayerStats(matchEvents, goalieTeamMap) {
   // Returns { playerName -> { goals, assists, cleanSheets } }
   const stats = {}
   const ensure = name => { if (!stats[name]) stats[name] = { goals: 0, assists: 0, cleanSheets: 0 } }
+  // Normalise player names for consistent key storage
+  const normName = n => n.toLowerCase().trim()
+    .replace(/jr\.?/g, 'junior').replace(/[-']/g, ' ').replace(/\s+/g, ' ')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+
   for (const events of Object.values(matchEvents)) {
-    for (const s of (events.goalScorers || [])) { ensure(s); stats[s].goals++ }
-    for (const a of (events.assisters || [])) { ensure(a); stats[a].assists++ }
+    for (const s of (events.goalScorers || [])) {
+      const key = normName(s)
+      ensure(key); stats[key].goals++
+    }
+    for (const a of (events.assisters || [])) {
+      const key = normName(a)
+      ensure(key); stats[key].assists++
+    }
     const startingGKNames = (events.startingGoalkeepers || []).map(g => g.name)
     for (const team of (events.cleanSheetTeams || [])) {
       for (const [gkName, gkTeam] of Object.entries(goalieTeamMap)) {
@@ -124,7 +135,8 @@ function NamedPlayerSection({ label, hint, badge, names, onChange, players, disa
       {[0, 1, 2].map(i => {
         const name = names[i] || ''
         // Find matching stats using namesMatch
-        const matchedEntry = name ? Object.entries(playerStats).find(([k]) => namesMatch(name, k)) : null
+        const normLookup = n => n.toLowerCase().trim().replace(/jr\.?\b/g, 'junior').replace(/[-']/g, ' ').replace(/\s+/g, ' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        const matchedEntry = name ? Object.entries(playerStats).find(([k]) => k === normLookup(name) || namesMatch(name, k)) : null
         const statCount = matchedEntry ? matchedEntry[1][statKey] : 0
         const pts = statCount * ptsPer
         return (
