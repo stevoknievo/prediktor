@@ -648,6 +648,18 @@ exports.scheduledSync = functions.pubsub
         const ourId = teamLookup[key]
         if (ourId) {
           apiToOurId[f.id] = ourId
+          // Check if API has teams in opposite order to our seeded data
+          const seededDoc = seededSnap.docs.find(d => d.id === ourId)
+          const seededHome = seededDoc?.data()?.homeTeam
+          const apiTeamsSwapped = seededHome && f.homeTeam && seededHome !== f.homeTeam
+          // If swapped, flip scores so they align with seeded home/away orientation
+          const score90Home = apiTeamsSwapped ? f.score90Away : f.score90Home
+          const score90Away = apiTeamsSwapped ? f.score90Home : f.score90Away
+          const scoreAfterETHome = apiTeamsSwapped ? f.scoreAfterETAway : f.scoreAfterETHome
+          const scoreAfterETAway = apiTeamsSwapped ? f.scoreAfterETHome : f.scoreAfterETAway
+          const scorePenHome = apiTeamsSwapped ? f.scorePenAway : f.scorePenHome
+          const scorePenAway = apiTeamsSwapped ? f.scorePenHome : f.scorePenAway
+          if (apiTeamsSwapped) console.log(`syncFixtures: swapped scores for ${f.homeTeam} vs ${f.awayTeam} -> stored as ${seededHome} home`)
           batch.set(db.collection('fixtures').doc(ourId), {
             date: f.date,
             venue: f.venue,
@@ -655,12 +667,12 @@ exports.scheduledSync = functions.pubsub
             status: f.status,
             hasExtraTime: f.hasExtraTime,
             hasPenalties: f.hasPenalties,
-            score90Home: f.score90Home,
-            score90Away: f.score90Away,
-            scoreAfterETHome: f.scoreAfterETHome,
-            scoreAfterETAway: f.scoreAfterETAway,
-            scorePenHome: f.scorePenHome,
-            scorePenAway: f.scorePenAway,
+            score90Home,
+            score90Away,
+            scoreAfterETHome,
+            scoreAfterETAway,
+            scorePenHome,
+            scorePenAway,
             apiFixtureId: f.id,
           }, { merge: true })
         } else {
