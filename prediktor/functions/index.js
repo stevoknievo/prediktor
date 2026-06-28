@@ -1,4 +1,4 @@
-// functions/index.js v6
+// functions/index.js v7
 // Firebase Cloud Functions for The Prediktor
 
 const functions = require('firebase-functions')
@@ -142,7 +142,7 @@ function scorePlayer(player, playerPreds, tournPred, fixtures, matchEvents, goal
   }
 
   // Partial name matching helper — handles "Vinicius" matching "Vinicius Junior" etc
-    function namesMatch(predName, apiName) {
+  function namesMatch(predName, apiName) {
     const normalise = n => n.toLowerCase().trim()
       .replace(/\bjr\.?\b/g, 'junior')
       .replace(/\bst\.?\b/g, 'saint')
@@ -154,7 +154,7 @@ function scorePlayer(player, playerPreds, tournPred, fixtures, matchEvents, goal
     if (a.includes(p) || p.includes(a)) return true
     const pParts = p.split(' '), aParts = a.split(' ')
     const pLast = pParts[pParts.length-1], aLast = aParts[aParts.length-1]
-    if (pLast.length > 5 && pLast === aLast) return true  // min 6 chars to avoid false positives
+    if (pLast.length > 5 && pLast === aLast) return true
     if (aParts.length === 2 && aParts[0].endsWith('.')) {
       const apiInitial = aParts[0][0], apiLast = aParts[1]
       if (pParts.length >= 2 && pParts[0][0] === apiInitial && pParts[pParts.length-1] === apiLast) return true
@@ -168,7 +168,7 @@ function scorePlayer(player, playerPreds, tournPred, fixtures, matchEvents, goal
 
   // Named player stats per match — only process mXXX documents to prevent double-counting
   for (const [eventId, events] of Object.entries(matchEvents)) {
-    if (!eventId.startsWith('m')) continue  // skip any stale numeric documents
+    if (!eventId.startsWith('m')) continue
     for (const scorer of (events.goalScorers || [])) {
       if (namedScorers.some(n => namesMatch(n, scorer))) {
         total += 2; breakdown.push(`+2 goal: ${scorer}`)
@@ -273,13 +273,16 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
 
     // Load our seeded fixtures to build a team-name -> mXXX ID lookup
     const seededSnap = await db.collection('fixtures').get()
-    // Sort team names alphabetically so home/away order doesn't matter
-    const teamLookup = {} // "TeamA|TeamB" (sorted) -> mXXX doc ID
+
+    // Build sorted-key lookup AND seeded home team map for swap detection
+    const teamLookup = {}    // "TeamA|TeamB" (sorted) -> mXXX doc ID
+    const seededHomeMap = {} // mXXX doc ID -> seeded homeTeam name
     seededSnap.docs.forEach(d => {
       const data = d.data()
       if (d.id.startsWith('m') && data.homeTeam && data.awayTeam) {
         const key = [data.homeTeam, data.awayTeam].sort().join('|')
         teamLookup[key] = d.id
+        seededHomeMap[d.id] = data.homeTeam
       }
     })
 
@@ -290,8 +293,16 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
       const key = [f.homeTeam, f.awayTeam].sort().join('|')
       const ourId = teamLookup[key]
       if (ourId) {
-        // Update our existing mXXX document with result data
         apiToOurId[f.id] = ourId
+
+        // If the API has teams in the opposite order to our seeded data, flip all scores
+        const seededHome = seededHomeMap[ourId]
+        const scoresAreSwapped = seededHome && f.homeTeam !== seededHome
+
+        if (scoresAreSwapped) {
+          console.log(`syncFixtures: swapping scores for ${f.homeTeam} vs ${f.awayTeam} (seeded home: ${seededHome})`)
+        }
+
         batch.set(db.collection('fixtures').doc(ourId), {
           date: f.date,
           venue: f.venue,
@@ -299,12 +310,12 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
           status: f.status,
           hasExtraTime: f.hasExtraTime,
           hasPenalties: f.hasPenalties,
-          score90Home: f.score90Home,
-          score90Away: f.score90Away,
-          scoreAfterETHome: f.scoreAfterETHome,
-          scoreAfterETAway: f.scoreAfterETAway,
-          scorePenHome: f.scorePenHome,
-          scorePenAway: f.scorePenAway,
+          score90Home:      scoresAreSwapped ? f.score90Away      : f.score90Home,
+          score90Away:      scoresAreSwapped ? f.score90Home      : f.score90Away,
+          scoreAfterETHome: scoresAreSwapped ? f.scoreAfterETAway : f.scoreAfterETHome,
+          scoreAfterETAway: scoresAreSwapped ? f.scoreAfterETHome : f.scoreAfterETAway,
+          scorePenHome:     scoresAreSwapped ? f.scorePenAway     : f.scorePenHome,
+          scorePenAway:     scoresAreSwapped ? f.scorePenHome     : f.scorePenAway,
           apiFixtureId: f.id,
         }, { merge: true })
       } else {
@@ -336,7 +347,6 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
       try {
         const docId = fixture.ourId || fixture.id
         const existingEvents = await db.collection('matchEvents').doc(docId).get()
-        // Re-fetch if no events yet, OR if fixture completed recently (within 48h)
         const fixtureDate = new Date(fixture.date)
         const hoursSinceCompletion = (Date.now() - fixtureDate.getTime()) / 3600000
         if (existingEvents.exists && hoursSinceCompletion > 48) continue
@@ -349,7 +359,6 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
 
         const events = eventsResult.response
         const goalScorers = [], assisters = [], yellowCards = [], redCards = []
-        // Track unique event IDs to prevent duplicate entries from API
         const seenEvents = new Set()
 
         for (const e of events) {
@@ -380,23 +389,28 @@ exports.syncFixtures = functions.https.onCall(async (data, context) => {
             const startXI = teamLineup.startXI || []
             for (const player of startXI) {
               if (player.player?.pos === 'G') {
-                startingGoalkeepers.push({
-                  name: player.player.name,
-                  team: teamName
-                })
+                startingGoalkeepers.push({ name: player.player.name, team: teamName })
               }
             }
           }
         }
 
+        // Clean sheets: apply same swap correction so teams are in seeded order
+        const seededHome = seededHomeMap[fixture.ourId]
+        const swapped = seededHome && fixture.homeTeam !== seededHome
+        const correctedHomeScore = swapped ? fixture.score90Away : fixture.score90Home
+        const correctedAwayScore = swapped ? fixture.score90Home : fixture.score90Away
+        const correctedHomeTeam = swapped ? fixture.awayTeam : fixture.homeTeam
+        const correctedAwayTeam = swapped ? fixture.homeTeam : fixture.awayTeam
+
         const cleanSheetTeams = []
-        if (fixture.score90Home === 0) cleanSheetTeams.push(fixture.awayTeam)
-        if (fixture.score90Away === 0) cleanSheetTeams.push(fixture.homeTeam)
+        if (correctedHomeScore === 0) cleanSheetTeams.push(correctedAwayTeam)
+        if (correctedAwayScore === 0) cleanSheetTeams.push(correctedHomeTeam)
 
         await db.collection('matchEvents').doc(docId).set({
           fixtureId: docId,
-          homeTeam: fixture.homeTeam,
-          awayTeam: fixture.awayTeam,
+          homeTeam: correctedHomeTeam,
+          awayTeam: correctedAwayTeam,
           date: fixture.date,
           goalScorers, assisters, yellowCards, redCards, cleanSheetTeams,
           startingGoalkeepers,
@@ -454,7 +468,6 @@ exports.scoreAllPlayers = functions.https.onCall(async (data, context) => {
     tournPredsSnap.docs.forEach(d => { tournamentPredictions[d.id] = d.data() })
 
     const players = playersSnap.docs.map(d => d.data())
-    // Note: .exists is a property in admin SDK, not a function
     const outcomes = outcomesSnap.exists ? outcomesSnap.data() : {}
 
     // Build goalie->team map
@@ -503,343 +516,14 @@ exports.getTournamentOdds = functions.https.onCall(async (data, context) => {
       res.on('data', chunk => { data += chunk })
       res.on('end', () => {
         try {
-          const json = JSON.parse(data)
-          const odds = {}
-          if (json?.[0]?.bookmakers?.[0]?.markets?.[0]?.outcomes) {
-            json[0].bookmakers[0].markets[0].outcomes.forEach(o => { odds[o.name] = o.price })
-          }
-          resolve({ success: true, odds })
-        } catch (e) { resolve({ success: false, odds: null }) }
+          const parsed = JSON.parse(data)
+          resolve({ success: true, odds: parsed })
+        } catch (e) {
+          resolve({ success: false, odds: null })
+        }
       })
     })
     req.on('error', () => resolve({ success: false, odds: null }))
     req.end()
   })
 })
-
-// ── Generate Scout Report ─────────────────────────────────────────────────
-
-exports.generateScoutReport = functions.https.onCall(async (data, context) => {
-  const secretDoc = await db.collection('meta').doc('secrets').get()
-  const anthropicKey = secretDoc.data()?.anthropicKey
-  if (!anthropicKey) {
-    return { success: false, error: 'Anthropic API key not configured' }
-  }
-
-  let { prompt } = data
-  if (!prompt) return { success: false, error: 'No prompt provided' }
-
-  let oddsText = 'Odds unavailable'
-  try {
-    const oddsKey = secretDoc.data()?.oddsApiKey
-    if (oddsKey) {
-      oddsText = await new Promise((resolve) => {
-        const options = {
-          hostname: 'api.the-odds-api.com',
-          path: `/v4/sports/soccer_fifa_world_cup_winner/odds/?apiKey=${oddsKey}&regions=uk&markets=outrights&oddsFormat=decimal`,
-          method: 'GET',
-        }
-        const req = https.request(options, res => {
-          let d = ''
-          res.on('data', chunk => { d += chunk })
-          res.on('end', () => {
-            try {
-              const json = JSON.parse(d)
-              const outcomes = json?.[0]?.bookmakers?.[0]?.markets?.[0]?.outcomes || []
-              resolve(outcomes.slice(0, 15).map(o => `${o.name}: ${o.price}`).join(', ') || 'Odds unavailable')
-            } catch { resolve('Odds unavailable') }
-          })
-        })
-        req.on('error', () => resolve('Odds unavailable'))
-        req.end()
-      })
-    }
-  } catch { oddsText = 'Odds unavailable' }
-
-  prompt = prompt.replace('To be provided by the server', oddsText)
-
-  return new Promise((resolve) => {
-    const body = JSON.stringify({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 1000,
-      messages: [{ role: 'user', content: prompt }]
-    })
-    const options = {
-      hostname: 'api.anthropic.com',
-      path: '/v1/messages',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': anthropicKey,
-        'anthropic-version': '2023-06-01',
-        'Content-Length': Buffer.byteLength(body)
-      }
-    }
-    const req = https.request(options, res => {
-      let responseData = ''
-      res.on('data', chunk => { responseData += chunk })
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(responseData)
-          const text = json.content?.[0]?.text
-          if (text) {
-            resolve({ success: true, report: text })
-          } else {
-            console.error('Unexpected response:', responseData.substring(0, 500))
-            resolve({ success: false, error: json.error?.message || 'No content in response' })
-          }
-        } catch (e) {
-          console.error('Parse error:', e.message)
-          resolve({ success: false, error: e.message })
-        }
-      })
-    })
-    req.on('error', e => resolve({ success: false, error: e.message }))
-    req.write(body)
-    req.end()
-  })
-})
-
-// ── Scheduled nightly sync + scoring ─────────────────────────────────────
-// Runs at 2am UTC (3am BST) every day during the tournament
-
-exports.scheduledSync = functions.pubsub
-  .schedule('0 2 * * *')
-  .timeZone('UTC')
-  .onRun(async () => {
-    console.log('scheduledSync: starting nightly sync + scoring')
-    try {
-      const secretDoc = await db.collection('meta').doc('secrets').get()
-      const footballApiKey = secretDoc.data()?.footballApiKey
-
-      if (!footballApiKey) {
-        console.error('scheduledSync: Football API key not configured')
-        return null
-      }
-
-      // Step 1: Sync fixtures
-      const result = await apiFetch(
-        `/fixtures?league=${WC_LEAGUE_ID}&season=${WC_SEASON}`,
-        footballApiKey
-      )
-
-      if (!result.response || result.response.length === 0) {
-        console.error('scheduledSync: No fixtures returned. Response:', JSON.stringify(result).substring(0, 500))
-        return null
-      }
-
-      const fixtures = result.response.map(normalizeFixture)
-
-      // Build sorted team name lookup to match API fixtures to mXXX IDs
-      const seededSnap = await db.collection('fixtures').get()
-      const teamLookup = {}
-      seededSnap.docs.forEach(d => {
-        const data = d.data()
-        if (d.id.startsWith('m') && data.homeTeam && data.awayTeam) {
-          const key = [data.homeTeam, data.awayTeam].sort().join('|')
-          teamLookup[key] = d.id
-        }
-      })
-
-      const batch = db.batch()
-      const apiToOurId = {}
-      for (const f of fixtures) {
-        const key = [f.homeTeam, f.awayTeam].sort().join('|')
-        const ourId = teamLookup[key]
-        if (ourId) {
-          apiToOurId[f.id] = ourId
-          // Check if API has teams in opposite order to our seeded data
-          const seededDoc = seededSnap.docs.find(d => d.id === ourId)
-          const seededHome = seededDoc?.data()?.homeTeam
-          const apiTeamsSwapped = seededHome && f.homeTeam && seededHome !== f.homeTeam
-          // If swapped, flip scores so they align with seeded home/away orientation
-          const score90Home = apiTeamsSwapped ? f.score90Away : f.score90Home
-          const score90Away = apiTeamsSwapped ? f.score90Home : f.score90Away
-          const scoreAfterETHome = apiTeamsSwapped ? f.scoreAfterETAway : f.scoreAfterETHome
-          const scoreAfterETAway = apiTeamsSwapped ? f.scoreAfterETHome : f.scoreAfterETAway
-          const scorePenHome = apiTeamsSwapped ? f.scorePenAway : f.scorePenHome
-          const scorePenAway = apiTeamsSwapped ? f.scorePenHome : f.scorePenAway
-          if (apiTeamsSwapped) console.log(`syncFixtures: swapped scores for ${f.homeTeam} vs ${f.awayTeam} -> stored as ${seededHome} home`)
-          batch.set(db.collection('fixtures').doc(ourId), {
-            date: f.date,
-            venue: f.venue,
-            completed: f.completed,
-            status: f.status,
-            hasExtraTime: f.hasExtraTime,
-            hasPenalties: f.hasPenalties,
-            score90Home,
-            score90Away,
-            scoreAfterETHome,
-            scoreAfterETAway,
-            scorePenHome,
-            scorePenAway,
-            apiFixtureId: f.id,
-          }, { merge: true })
-        } else {
-          console.warn(`scheduledSync: no mXXX match for ${f.homeTeam} vs ${f.awayTeam}`)
-        }
-      }
-      await batch.commit()
-
-      // Safety net: delete any numeric fixture documents that may exist
-      const allFixturesSnap = await db.collection('fixtures').get()
-      const cleanupBatch = db.batch()
-      let numericCount = 0
-      allFixturesSnap.docs.forEach(d => {
-        if (!d.id.startsWith('m')) {
-          cleanupBatch.delete(db.collection('fixtures').doc(d.id))
-          numericCount++
-        }
-      })
-      if (numericCount > 0) {
-        await cleanupBatch.commit()
-        console.log(`scheduledSync: deleted ${numericCount} stale numeric fixture documents`)
-      }
-
-      console.log(`scheduledSync: synced ${fixtures.length} fixtures`)
-
-      // Fetch events for newly completed fixtures (using mXXX IDs)
-      const completedFixtures = fixtures.filter(f => f.completed && apiToOurId[f.id])
-        .map(f => ({ ...f, ourId: apiToOurId[f.id] }))
-      let eventsUpdated = 0
-
-      for (const fixture of completedFixtures) {
-        try {
-          const docId = fixture.ourId
-          const existing = await db.collection('matchEvents').doc(docId).get()
-          // Re-fetch if no events yet, OR if fixture completed recently (within 48h)
-          const fixtureDate = new Date(fixture.date)
-          const hoursSinceCompletion = (Date.now() - fixtureDate.getTime()) / 3600000
-          if (existing.exists && hoursSinceCompletion > 48) continue
-
-          const [eventsResult, lineupsResult] = await Promise.all([
-            apiFetch(`/fixtures/events?fixture=${fixture.id}`, footballApiKey),
-            apiFetch(`/fixtures/lineups?fixture=${fixture.id}`, footballApiKey),
-          ])
-          if (!eventsResult.response) continue
-
-          const events = eventsResult.response
-          const goalScorers = [], assisters = [], yellowCards = [], redCards = []
-          // Deduplicate by counting expected goals per player from score
-          // and by tracking unique player+minute combinations
-          const seenEvents = new Set()
-
-          for (const e of events) {
-            // Use player name + type + elapsed minutes as unique key
-            // Allow same player to score at different minutes
-            const elapsed = e.time?.elapsed ?? e.time?.extra ?? 0
-            const eventKey = `${e.player?.name}_${e.type}_${e.detail}_${elapsed}`
-            if (seenEvents.has(eventKey)) continue
-            seenEvents.add(eventKey)
-
-            if (e.type === 'Goal' && e.detail !== 'Own Goal' && e.detail !== 'Missed Penalty') {
-              if (e.player?.name) goalScorers.push(e.player.name)
-              if (e.assist?.name) assisters.push(e.assist.name)
-            }
-            if (e.type === 'Card') {
-              if (e.detail === 'Yellow Card' && e.player?.name) {
-                yellowCards.push({ player: e.player.name, team: e.team?.name })
-              }
-              if ((e.detail === 'Red Card' || e.detail === 'Second Yellow card') && e.player?.name) {
-                redCards.push({ player: e.player.name, team: e.team?.name })
-              }
-            }
-          }
-
-          const startingGoalkeepers = []
-          if (lineupsResult?.response) {
-            for (const teamLineup of lineupsResult.response) {
-              const teamName = teamLineup.team?.name
-              const startXI = teamLineup.startXI || []
-              for (const player of startXI) {
-                if (player.player?.pos === 'G') {
-                  startingGoalkeepers.push({
-                    name: player.player.name,
-                    team: teamName
-                  })
-                }
-              }
-            }
-          }
-
-          const cleanSheetTeams = []
-          if (fixture.score90Home === 0) cleanSheetTeams.push(fixture.awayTeam)
-          if (fixture.score90Away === 0) cleanSheetTeams.push(fixture.homeTeam)
-
-          await db.collection('matchEvents').doc(docId).set({
-            fixtureId: docId,
-            homeTeam: fixture.homeTeam,
-            awayTeam: fixture.awayTeam,
-            date: fixture.date,
-            goalScorers, assisters, yellowCards, redCards, cleanSheetTeams,
-            startingGoalkeepers,
-            fetchedAt: admin.firestore.FieldValue.serverTimestamp()
-          })
-
-          eventsUpdated++
-          await new Promise(r => setTimeout(r, 250))
-        } catch (err) {
-          console.error(`scheduledSync: error fetching events for ${fixture.id}:`, err.message)
-        }
-      }
-      console.log(`scheduledSync: fetched events for ${eventsUpdated} matches`)
-
-      // Step 2: Score all players
-      const [fixturesSnap, predsSnap, tournPredsSnap, playersSnap, eventsSnap, squadsSnap, outcomesSnap] =
-        await Promise.all([
-          db.collection('fixtures').get(),
-          db.collection('predictions').get(),
-          db.collection('tournamentPredictions').get(),
-          db.collection('players').get(),
-          db.collection('matchEvents').get(),
-          db.collection('meta').doc('squads').get(),
-          db.collection('meta').doc('tournamentOutcomes').get(),
-        ])
-
-      const fixturesMap = {}
-      fixturesSnap.docs.forEach(d => { fixturesMap[d.id] = d.data() })
-
-      const matchEventsMap = {}
-      eventsSnap.docs.forEach(d => { matchEventsMap[d.id] = d.data() })
-
-      const predictionsMap = {}
-      predsSnap.docs.forEach(d => {
-        const p = d.data()
-        if (!predictionsMap[p.playerId]) predictionsMap[p.playerId] = {}
-        predictionsMap[p.playerId][p.fixtureId] = p
-      })
-
-      const tournamentPredictions = {}
-      tournPredsSnap.docs.forEach(d => { tournamentPredictions[d.id] = d.data() })
-
-      const players = playersSnap.docs.map(d => d.data())
-      // Note: .exists is a property in admin SDK, not a function
-      const outcomes = outcomesSnap.exists ? outcomesSnap.data() : {}
-
-      const goalieTeamMap = {}
-      if (squadsSnap.exists) {
-        const squads = squadsSnap.data().players
-        for (const [team, squad] of Object.entries(squads)) {
-          for (const gk of (squad.goalkeepers || [])) {
-            goalieTeamMap[gk.toLowerCase()] = team
-          }
-        }
-      }
-
-      const scoringBatch = db.batch()
-      for (const player of players) {
-        const playerPreds = predictionsMap[player.id] || {}
-        const tournPred = tournamentPredictions[player.id] || {}
-        const { total } = scorePlayer(player, playerPreds, tournPred, fixturesMap, matchEventsMap, goalieTeamMap, outcomes)
-        scoringBatch.update(db.collection('players').doc(player.id), { totalPoints: total })
-      }
-
-      await scoringBatch.commit()
-      console.log(`scheduledSync: scored ${players.length} players`)
-      return null
-
-    } catch (err) {
-      console.error('scheduledSync error:', err)
-      return null
-    }
-  })
