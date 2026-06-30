@@ -230,6 +230,143 @@ function BroadcastComposer({ addLog }) {
   )
 }
 
+
+const R32_TO_R16 = {
+  'm089': ['m074','m077'], 'm090': ['m073','m075'],
+  'm091': ['m076','m078'], 'm092': ['m079','m080'],
+  'm093': ['m083','m084'], 'm094': ['m081','m082'],
+  'm095': ['m086','m088'], 'm096': ['m085','m087'],
+}
+
+function getMatchWinner(fixture) {
+  if (!fixture?.completed) return null
+  const h = Number(fixture.score90Home), a = Number(fixture.score90Away)
+  if (fixture.hasPenalties) {
+    const hPen = Number(fixture.scorePenHome), aPen = Number(fixture.scorePenAway)
+    return hPen > aPen ? fixture.homeTeam : fixture.awayTeam
+  }
+  if (fixture.hasExtraTime) {
+    const hET = Number(fixture.scoreAfterETHome), aET = Number(fixture.scoreAfterETAway)
+    return hET > aET ? fixture.homeTeam : fixture.awayTeam
+  }
+  if (h === a) return null // unresolved draw without ET/pens recorded
+  return h > a ? fixture.homeTeam : fixture.awayTeam
+}
+
+function BracketAudit({ addLog }) {
+  const [fixtures, setFixtures] = useState({})
+  const [loading, setLoading] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+
+  async function loadFixtures() {
+    setLoading(true)
+    const snap = await getDocs(collection(db, 'fixtures'))
+    const map = {}
+    snap.docs.forEach(d => { map[d.id] = d.data() })
+    setFixtures(map)
+    setLoaded(true)
+    setLoading(false)
+  }
+
+  async function fixR16Teams(r16Id, correctHome, correctAway) {
+    await setDoc(doc(db, 'fixtures', r16Id), {
+      homeTeam: correctHome,
+      awayTeam: correctAway,
+    }, { merge: true })
+    addLog(`✓ Fixed ${r16Id}: set to ${correctHome} v ${correctAway}`, 'success')
+    loadFixtures()
+  }
+
+  const r32Rows = Object.keys(fixtures)
+    .filter(id => id.startsWith('m0') && Number(id.slice(1)) >= 73 && Number(id.slice(1)) <= 88)
+    .sort()
+    .map(id => {
+      const f = fixtures[id]
+      const winner = getMatchWinner(f)
+      return { id, fixture: f, winner }
+    })
+
+  const r16Rows = Object.entries(R32_TO_R16).map(([r16id, [src1, src2]]) => {
+    const f1 = fixtures[src1], f2 = fixtures[src2]
+    const w1 = getMatchWinner(f1), w2 = getMatchWinner(f2)
+    const r16fixture = fixtures[r16id]
+    // What the app currently has stored for this R16 fixture
+    const storedHome = r16fixture?.homeTeam
+    const storedAway = r16fixture?.awayTeam
+    // What it SHOULD be based on our mapping + actual R32 results
+    const expectedHome = w1
+    const expectedAway = w2
+    const mismatch = (w1 && w2) && (
+      (storedHome !== 'TBD' && storedHome !== expectedHome) ||
+      (storedAway !== 'TBD' && storedAway !== expectedAway)
+    )
+    return { r16id, src1, src2, f1, f2, w1, w2, storedHome, storedAway, expectedHome, expectedAway, mismatch }
+  })
+
+  return (
+    <div className="card" style={{ marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+        <h3>🔍 BRACKET AUDIT</h3>
+        <button className="btn btn-ghost" style={{ fontSize: '0.85rem', padding: '0.35rem 0.9rem' }} onClick={loadFixtures} disabled={loading}>
+          {loading ? 'Loading...' : 'Load & Check'}
+        </button>
+      </div>
+      <p style={{ fontSize: '0.82rem', marginBottom: '1rem', color: 'var(--muted)' }}>
+        Compares completed Round of 32 results against our R16 bracket mapping. Flags any mismatch where the
+        stored R16 fixture doesn't match the actual winners advancing.
+      </p>
+
+      {loaded && (
+        <>
+          <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginBottom: '0.5rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Round of 32 Results
+          </div>
+          {r32Rows.map(({ id, fixture, winner }) => (
+            <div key={id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid var(--border)', fontSize: '0.85rem' }}>
+              <span>{id}: {fixture?.homeTeam || '?'} v {fixture?.awayTeam || '?'}</span>
+              <span style={{ color: winner ? 'var(--green)' : 'var(--muted)' }}>
+                {fixture?.completed ? `${fixture.score90Home}-${fixture.score90Away}${winner ? ` → ${winner}` : ' (unresolved)'}` : 'not played'}
+              </span>
+            </div>
+          ))}
+
+          <div style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: '1rem 0 0.5rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Round of 16 Mapping Check
+          </div>
+          {r16Rows.map(row => (
+            <div key={row.r16id} style={{
+              padding: '0.6rem 0.75rem', marginBottom: '0.4rem', borderRadius: 8,
+              background: row.mismatch ? 'rgba(239,68,68,0.1)' : 'var(--panel2)',
+              border: `1px solid ${row.mismatch ? 'rgba(239,68,68,0.3)' : 'var(--border)'}`,
+            }}>
+              <div style={{ fontSize: '0.85rem', marginBottom: '0.2rem' }}>
+                <strong>{row.r16id}</strong> — from {row.src1} ({row.w1 || 'TBD'}) v {row.src2} ({row.w2 || 'TBD'})
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>
+                Stored: {row.storedHome || 'TBD'} v {row.storedAway || 'TBD'}
+              </div>
+              {row.mismatch && (
+                <>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--red)', marginTop: '0.2rem' }}>
+                    ⚠️ Mismatch — expected {row.expectedHome} v {row.expectedAway}
+                  </div>
+                  <button
+                    className="btn btn-primary"
+                    style={{ fontSize: '0.75rem', padding: '0.3rem 0.75rem', marginTop: '0.4rem' }}
+                    onClick={() => fixR16Teams(row.r16id, row.expectedHome, row.expectedAway)}
+                  >
+                    Fix to {row.expectedHome} v {row.expectedAway}
+                  </button>
+                </>
+              )}
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function Admin() {
   const [authed, setAuthed] = useState(false)
   const [pass, setPass] = useState('')
@@ -341,6 +478,8 @@ export default function Admin() {
       <h2 style={{ marginBottom: '1.5rem' }}>ADMIN PANEL</h2>
 
       <PlayerManager addLog={addLog} />
+
+      <BracketAudit addLog={addLog} />
 
       <AddPlayerPanel addLog={addLog} />
 
