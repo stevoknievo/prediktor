@@ -1,5 +1,5 @@
 // functions/index.js v8
-// Firebase Cloud Functions for The Prediktor
+// Firebase Cloud Functions for The Prediktor now
 
 const functions = require('firebase-functions')
 const admin = require('firebase-admin')
