@@ -4,6 +4,7 @@ import { getFunctions, httpsCallable } from 'firebase/functions'
 import { saveConfig, getTournamentOutcomes, saveTournamentOutcomes } from '../lib/db'
 import { db } from '../lib/firebase'
 import { collection, getDocs, deleteDoc, doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore'
+import { generateRoundOf32, calculateAllQualifiers, GROUP_FIXTURES } from '../lib/qualification'
 
 const ADMIN_PASS = import.meta.env.VITE_ADMIN_PASS || 'prediktor2026'
 
@@ -253,6 +254,98 @@ function getMatchWinner(fixture) {
   return h > a ? fixture.homeTeam : fixture.awayTeam
 }
 
+
+function PopulateRealBracket({ addLog }) {
+  const [preview, setPreview] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  async function checkGroupCompletion() {
+    setLoading(true)
+    const fixturesSnap = await getDocs(collection(db, 'fixtures'))
+    const fixturesMap = {}
+    fixturesSnap.docs.forEach(d => { fixturesMap[d.id] = d.data() })
+
+    // Build "predictions" object using ACTUAL results, since calculateAllQualifiers
+    // expects a predictions-shaped object with score90Home/score90Away
+    const actualResults = {}
+    const allGroupFixtureIds = Object.values(GROUP_FIXTURES).flat()
+    let completedCount = 0
+    for (const fid of allGroupFixtureIds) {
+      const f = fixturesMap[fid]
+      if (f?.completed && f.score90Home !== null && f.score90Away !== null) {
+        actualResults[fid] = { score90Home: f.score90Home, score90Away: f.score90Away }
+        completedCount++
+      }
+    }
+
+    const allComplete = completedCount === allGroupFixtureIds.length
+    const r32 = generateRoundOf32(fixturesMap, actualResults)
+
+    setPreview({
+      fixturesMap,
+      actualResults,
+      r32,
+      completedCount,
+      totalGroupFixtures: allGroupFixtureIds.length,
+      allComplete,
+    })
+    setLoading(false)
+  }
+
+  async function applyToFirestore() {
+    if (!preview) return
+    const batch = []
+    for (const r of preview.r32) {
+      if (r.homeTeam === 'TBD' || r.awayTeam === 'TBD') continue
+      await setDoc(doc(db, 'fixtures', r.id), {
+        homeTeam: r.homeTeam,
+        awayTeam: r.awayTeam,
+      }, { merge: true })
+      batch.push(r.id)
+    }
+    addLog(`✓ Populated real teams for ${batch.length} Round of 32 fixtures: ${batch.join(', ')}`, 'success')
+    checkGroupCompletion()
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+        <h3>⚽ POPULATE REAL R32 BRACKET</h3>
+        <button className="btn btn-ghost" style={{ fontSize: '0.85rem', padding: '0.35rem 0.9rem' }} onClick={checkGroupCompletion} disabled={loading}>
+          {loading ? 'Checking...' : 'Check & Preview'}
+        </button>
+      </div>
+      <p style={{ fontSize: '0.82rem', marginBottom: '1rem', color: 'var(--muted)' }}>
+        Computes the real Round of 32 matchups from actual completed group-stage results (not predictions)
+        using the official Annex C table, then writes the qualified teams into m073-m088.
+      </p>
+
+      {preview && (
+        <>
+          <div style={{ fontSize: '0.82rem', marginBottom: '0.75rem', color: preview.allComplete ? 'var(--green)' : 'var(--gold)' }}>
+            {preview.completedCount}/{preview.totalGroupFixtures} group fixtures completed
+            {!preview.allComplete && ' — some third-place rankings may be provisional until all groups finish'}
+          </div>
+          {preview.r32.map(r => (
+            <div key={r.id} style={{
+              display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0',
+              borderBottom: '1px solid var(--border)', fontSize: '0.85rem'
+            }}>
+              <span>{r.id}</span>
+              <span style={{ color: (r.homeTeam === 'TBD' || r.awayTeam === 'TBD') ? 'var(--muted)' : 'var(--white)' }}>
+                {r.homeTeam} v {r.awayTeam}
+              </span>
+            </div>
+          ))}
+          <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={applyToFirestore}>
+            Apply These Teams to Firestore
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
 function BracketAudit({ addLog }) {
   const [fixtures, setFixtures] = useState({})
   const [loading, setLoading] = useState(false)
@@ -478,6 +571,8 @@ export default function Admin() {
       <h2 style={{ marginBottom: '1.5rem' }}>ADMIN PANEL</h2>
 
       <PlayerManager addLog={addLog} />
+
+      <PopulateRealBracket addLog={addLog} />
 
       <BracketAudit addLog={addLog} />
 
