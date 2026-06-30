@@ -213,6 +213,9 @@ function FixturePredictionsModal({ nickname, playerId, onClose, fixtures }) {
     'Round of 32','Round of 16','Quarter-final','Semi-final','3rd Place Final','Final'
   ]
 
+  // Real (unresolved) fixtures — used to check if predicted knockout matchup was correct
+  const realFixtures = fixtures
+
   const fixturesList = Object.values(resolvedFixtures)
     .filter(f => predictions[f.id])
     .sort((a, b) => {
@@ -221,7 +224,13 @@ function FixturePredictionsModal({ nickname, playerId, onClose, fixtures }) {
       return new Date(a.date) - new Date(b.date)
     })
 
-  const totalPts = fixturesList.reduce((sum, f) => sum + calcMatchPoints(f, predictions[f.id]), 0)
+  const totalPts = fixturesList.reduce((sum, f) => {
+    const real = realFixtures[f.id]
+    const matchupValid = !f.isKnockout || !real || real.homeTeam === 'TBD' || real.awayTeam === 'TBD' ||
+      (f.homeTeam === real.homeTeam && f.awayTeam === real.awayTeam) ||
+      (f.homeTeam === real.awayTeam && f.awayTeam === real.homeTeam)
+    return sum + (matchupValid ? calcMatchPoints(f, predictions[f.id]) : 0)
+  }, 0)
   const predictedCount = fixturesList.length
   const completedWithPred = fixturesList.filter(f => f.completed).length
 
@@ -288,7 +297,12 @@ function FixturePredictionsModal({ nickname, playerId, onClose, fixtures }) {
                     {stageFixtures.map(f => {
                       const pred = predictions[f.id]
                       if (!pred) return null
-                      const pts = calcMatchPoints(f, pred)
+                      // For knockout fixtures, only count points if the predicted matchup matches reality
+                      const real = realFixtures[f.id]
+                      const matchupValid = !f.isKnockout || !real || real.homeTeam === 'TBD' || real.awayTeam === 'TBD' ||
+                        (f.homeTeam === real.homeTeam && f.awayTeam === real.awayTeam) ||
+                        (f.homeTeam === real.awayTeam && f.awayTeam === real.homeTeam)
+                      const pts = matchupValid ? calcMatchPoints(f, pred) : 0
                       const actH = f.score90Home, actA = f.score90Away
                       const predH = pred.score90Home, predA = pred.score90Away
                       const correct = f.completed && Number(predH) === Number(actH) && Number(predA) === Number(actA)
@@ -317,6 +331,25 @@ function FixturePredictionsModal({ nickname, playerId, onClose, fixtures }) {
                             <div style={{ fontSize: '0.78rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                               {f.homeTeam === 'TBD' ? '?' : (f.homeTeamCode || f.homeTeam)} vs {f.awayTeam === 'TBD' ? '?' : (f.awayTeamCode || f.awayTeam)}
                             </div>
+                            {f.isKnockout && (() => {
+                              const real = realFixtures[f.id]
+                              if (!real || real.homeTeam === 'TBD' || real.awayTeam === 'TBD') return null
+                              const predictedRightMatchup =
+                                (f.homeTeam === real.homeTeam && f.awayTeam === real.awayTeam) ||
+                                (f.homeTeam === real.awayTeam && f.awayTeam === real.homeTeam)
+                              if (predictedRightMatchup) {
+                                return (
+                                  <div style={{ fontSize: '0.65rem', color: 'var(--green)', marginTop: '0.15rem' }}>
+                                    ✓ correct matchup
+                                  </div>
+                                )
+                              }
+                              return (
+                                <div style={{ fontSize: '0.65rem', color: 'var(--red)', marginTop: '0.15rem' }}>
+                                  ✗ actual: {real.homeTeamCode || real.homeTeam} vs {real.awayTeamCode || real.awayTeam}
+                                </div>
+                              )
+                            })()}
                           </div>
 
                           {/* Their prediction */}
