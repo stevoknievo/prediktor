@@ -126,7 +126,7 @@ function NumInput({ value, onChange, disabled, large, min = 0 }) {
   )
 }
 
-function FixtureRow({ fixture, prediction, onSave, locked, matchEvents, tournamentPred }) {
+function FixtureRow({ fixture, prediction, onSave, locked, reopened, matchEvents, tournamentPred }) {
   const isKnockout = fixture.isKnockout
   const isTBD = fixture.homeTeam === 'TBD' || fixture.awayTeam === 'TBD'
   const actual = fixture.completed
@@ -218,7 +218,9 @@ function FixtureRow({ fixture, prediction, onSave, locked, matchEvents, tourname
           {actual ? <span className="badge badge-green">FT</span>
             : locked ? <span className="badge badge-red">LOCKED</span>
             : isTBD ? <span className="badge badge-muted">TBD</span>
-            : <span className={`badge ${isKnockout ? 'badge-gold' : 'badge-cyan'}`}>OPEN</span>}
+            : <span className={`badge ${reopened ? 'badge-green' : isKnockout ? 'badge-gold' : 'badge-cyan'}`}>
+                {reopened ? '🔓 OPEN' : 'OPEN'}
+              </span>}
         </div>
       </div>
 
@@ -317,6 +319,7 @@ export default function Fixtures({ playerId }) {
   const [filter, setFilter] = useState('all')
   const [stageFilter, setStageFilter] = useState('all')
   const [sortOrder, setSortOrder] = useState('stage') // 'stage' | 'date'
+  const [knockoutWindows, setKnockoutWindows] = useState({})
   const [isUnlocked, setIsUnlocked] = useState(false)
   const [matchEvents, setMatchEvents] = useState({})
   const [tournamentPred, setTournamentPred] = useState(null)
@@ -343,6 +346,7 @@ export default function Fixtures({ playerId }) {
       setDeadline(d)
       const unlocked = configSnap.exists() ? (configSnap.data().unlockedPlayers || []) : []
       setIsUnlocked(unlocked.includes(playerId))
+      setKnockoutWindows(configSnap.exists() ? (configSnap.data().knockoutWindows || {}) : {})
       setLoading(false)
     })
   }, [playerId])
@@ -356,7 +360,16 @@ export default function Fixtures({ playerId }) {
   }, [])
 
   const now = new Date()
-  const isLocked = deadline ? (now > new Date(deadline) && !isUnlocked) : false
+  const deadlinePassed = deadline ? (now > new Date(deadline) && !isUnlocked) : false
+  const isLocked = deadlinePassed // base lock — per-fixture may override for open knockout rounds
+
+  function isFixtureLocked(fixture) {
+    if (!deadlinePassed) return false
+    if (fixture.completed) return true
+    // If this fixture's stage has an open knockout window, allow predictions
+    if (fixture.isKnockout && fixture.stage && knockoutWindows[fixture.stage]) return false
+    return true
+  }
 
   async function handleSave(fixtureId, data) {
     await savePrediction(playerId, fixtureId, data)
@@ -572,7 +585,8 @@ export default function Fixtures({ playerId }) {
                   fixture={f}
                   prediction={predictions[f.id]}
                   onSave={handleSave}
-                  locked={isLocked || f.completed}
+                  locked={isFixtureLocked(f)}
+                  reopened={deadlinePassed && f.isKnockout && f.stage && knockoutWindows[f.stage]}
                   matchEvents={matchEvents[f.id]}
                   tournamentPred={tournamentPred}
                 />
