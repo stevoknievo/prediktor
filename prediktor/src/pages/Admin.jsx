@@ -255,6 +255,62 @@ function getMatchWinner(fixture) {
 }
 
 
+
+const KNOCKOUT_ROUNDS = ['Round of 16', 'Quarter-final', 'Semi-final', 'Final', '3rd Place Final']
+
+function KnockoutWindows({ addLog }) {
+  const [windows, setWindows] = useState({})
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    getDoc(doc(db, 'meta', 'config')).then(snap => {
+      if (snap.exists()) setWindows(snap.data().knockoutWindows || {})
+    })
+  }, [])
+
+  async function toggleWindow(round) {
+    const updated = { ...windows, [round]: !windows[round] }
+    setWindows(updated)
+    await setDoc(doc(db, 'meta', 'config'), { knockoutWindows: updated }, { merge: true })
+    addLog(`✓ ${round} predictions ${updated[round] ? 'OPENED' : 'CLOSED'}`, 'success')
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: '1rem' }}>
+      <h3 style={{ marginBottom: '0.5rem' }}>🔓 KNOCKOUT PREDICTION WINDOWS</h3>
+      <p style={{ fontSize: '0.82rem', marginBottom: '1rem', color: 'var(--muted)' }}>
+        Open a round to let players submit fresh predictions for those real fixtures. 
+        Original R32 points are preserved. Open rounds override pre-tournament bracket predictions for scoring.
+      </p>
+      {KNOCKOUT_ROUNDS.map(round => (
+        <div key={round} style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '0.6rem 0', borderBottom: '1px solid var(--border)'
+        }}>
+          <div>
+            <div style={{ fontSize: '0.9rem' }}>{round}</div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
+              {windows[round] ? '🟢 Open for predictions' : '🔴 Closed'}
+            </div>
+          </div>
+          <button
+            onClick={() => toggleWindow(round)}
+            style={{
+              fontSize: '0.78rem', padding: '0.3rem 0.8rem', borderRadius: 6,
+              border: `1px solid ${windows[round] ? 'var(--red)' : 'var(--green)'}`,
+              background: windows[round] ? 'rgba(239,68,68,0.1)' : 'rgba(72,199,116,0.1)',
+              color: windows[round] ? 'var(--red)' : 'var(--green)',
+              cursor: 'pointer'
+            }}
+          >
+            {windows[round] ? 'Close' : 'Open'}
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function PopulateRealBracket({ addLog }) {
   const [preview, setPreview] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -577,6 +633,8 @@ export default function Admin() {
       <BracketAudit addLog={addLog} />
 
       <AddPlayerPanel addLog={addLog} />
+
+      <KnockoutWindows addLog={addLog} />
 
       <div className="card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ marginBottom: '1rem' }}>📅 PREDICTION DEADLINE</h3>
