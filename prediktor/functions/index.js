@@ -135,6 +135,29 @@ function scorePlayer(player, playerPreds, tournPred, fixtures, matchEvents, goal
     if (!fixture?.completed) continue
     const h90 = Number(pred.score90Home), a90 = Number(pred.score90Away)
     if (isNaN(h90) || isNaN(a90)) continue
+
+    // For knockout fixtures: only score if the prediction was saved when real teams were known
+    // Predictions saved with knockoutWindowPrediction:true were made during a re-opened window
+    // Pre-tournament bracket predictions for knockout fixtures are NOT scored directly here —
+    // they only count if the player happened to predict the correct matchup AND score
+    // We detect this by checking if teams were TBD when prediction was saved
+    if (fixture.isKnockout) {
+      const knockoutStages = ['Round of 32', 'Round of 16', 'Quarter-final', 'Semi-final', '3rd Place Final', 'Final']
+      if (knockoutStages.includes(fixture.stage)) {
+        // Only score if this was explicitly saved as a knockout window prediction
+        // OR if the prediction has teamsAtSave that match the real teams (meaning real teams were known)
+        const isWindowPred = pred.knockoutWindowPrediction === true
+        const teamsAtSave = pred.homeTeamAtSave
+        const teamsMatchedWhenSaved = teamsAtSave &&
+          teamsAtSave !== 'TBD' &&
+          teamsAtSave === fixture.homeTeam
+        if (!isWindowPred && !teamsMatchedWhenSaved) {
+          breakdown.push(`0 pts: ${fixture.homeTeam} v ${fixture.awayTeam} (pre-tournament bracket prediction — matchup not verified)`)
+          continue
+        }
+      }
+    }
+
     const actH90 = Number(fixture.score90Home), actA90 = Number(fixture.score90Away)
     const predResult = h90 > a90 ? 'h' : a90 > h90 ? 'a' : 'd'
     const actResult = actH90 > actA90 ? 'h' : actA90 > actH90 ? 'a' : 'd'
@@ -147,7 +170,10 @@ function scorePlayer(player, playerPreds, tournPred, fixtures, matchEvents, goal
 
     if (fixture.hasExtraTime && pred.scoreETHome !== undefined) {
       const hET = Number(pred.scoreETHome), aET = Number(pred.scoreETAway)
-      const actHET = Number(fixture.scoreAfterETHome), actAET = Number(fixture.scoreAfterETAway)
+      // If API returns null for ET scores (common when score didn't change in ET),
+      // fall back to the 90min score as the effective ET score
+      const actHET = fixture.scoreAfterETHome !== null ? Number(fixture.scoreAfterETHome) : Number(fixture.score90Home)
+      const actAET = fixture.scoreAfterETAway !== null ? Number(fixture.scoreAfterETAway) : Number(fixture.score90Away)
       if (!isNaN(hET) && !isNaN(aET) && !isNaN(actHET) && !isNaN(actAET)) {
         if (hET === actHET && aET === actAET) { total += 4; breakdown.push('+4 correct ET score') }
         else if ((hET > aET ? 'h' : aET > hET ? 'a' : 'd') === (actHET > actAET ? 'h' : actAET > actHET ? 'a' : 'd')) {
