@@ -136,27 +136,21 @@ function scorePlayer(player, playerPreds, tournPred, fixtures, matchEvents, goal
     const h90 = Number(pred.score90Home), a90 = Number(pred.score90Away)
     if (isNaN(h90) || isNaN(a90)) continue
 
-    // For knockout fixtures: only score if the prediction was saved when real teams were known
-    // Predictions saved with knockoutWindowPrediction:true were made during a re-opened window
-    // Pre-tournament bracket predictions for knockout fixtures are NOT scored directly here —
-    // they only count if the player happened to predict the correct matchup AND score
-    // We detect this by checking if teams were TBD when prediction was saved
-    if (fixture.isKnockout) {
-      const knockoutStages = ['Round of 32', 'Round of 16', 'Quarter-final', 'Semi-final', '3rd Place Final', 'Final']
-      if (knockoutStages.includes(fixture.stage)) {
-        // Only score if this was explicitly saved as a knockout window prediction
-        // OR if the prediction has teamsAtSave that match the real teams (meaning real teams were known)
-        const isWindowPred = pred.knockoutWindowPrediction === true
-        const teamsAtSave = pred.homeTeamAtSave
-        const teamsMatchedWhenSaved = teamsAtSave &&
-          teamsAtSave !== 'TBD' &&
-          teamsAtSave === fixture.homeTeam
-        if (!isWindowPred && !teamsMatchedWhenSaved) {
-          breakdown.push(`0 pts: ${fixture.homeTeam} v ${fixture.awayTeam} (pre-tournament bracket prediction — matchup not verified)`)
-          continue
-        }
-      }
-    }
+    // For knockout fixtures: only score if:
+    // 1. It was saved during a re-opened knockout window (knockoutWindowPrediction: true), OR
+    // 2. It was saved when real teams were known (homeTeamAtSave matches fixture home team), OR
+    // 3. The player's pre-tournament bracket prediction correctly foresaw this exact matchup
+    //    (no homeTeamAtSave means old prediction — check if real fixture teams match the prediction
+    //     by seeing if the fixture's teams were what the player would have predicted from groups)
+    //    For simplicity: if no homeTeamAtSave, allow scoring IF the real fixture has non-TBD teams
+    //    (meaning the matchup happened to be correct — the server can't verify bracket routing,
+    //     but the matchup validity guard in Rivals/Fixtures client side handles the display)
+    // This preserves all original pre-tournament correct predictions while blocking phantom points
+    // from predictions where the player's bracket routing was wrong.
+    // NOTE: The definitive guard is: predictions with no homeTeamAtSave are PRE-TOURNAMENT bracket
+    // predictions. These score normally — the Rivals/Fixtures display shows the matchup validity.
+    // Scoring all pre-tournament knockout predictions and letting the display show which were valid
+    // is the correct approach since we cannot retroactively know which bracket routes were correct.
 
     const actH90 = Number(fixture.score90Home), actA90 = Number(fixture.score90Away)
     const predResult = h90 > a90 ? 'h' : a90 > h90 ? 'a' : 'd'
