@@ -52,16 +52,6 @@ function calcMatchPoints(fixture, pred, matchEvents, tournamentPred) {
   const breakdown = []
   let total = 0
 
-  // For knockout fixtures, only score if teams were real when prediction was saved
-  if (fixture.isKnockout) {
-    const isWindowPred = pred.knockoutWindowPrediction === true
-    const teamsAtSave = pred.homeTeamAtSave
-    const teamsMatchedWhenSaved = teamsAtSave && teamsAtSave !== 'TBD' && teamsAtSave === fixture.homeTeam
-    if (!isWindowPred && !teamsMatchedWhenSaved) {
-      return { total: 0, breakdown: ['Pre-tournament bracket prediction — not scored directly'] }
-    }
-  }
-
   const h90 = Number(pred.score90Home), a90 = Number(pred.score90Away)
   const actH90 = Number(fixture.score90Home), actA90 = Number(fixture.score90Away)
 
