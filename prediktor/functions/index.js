@@ -186,6 +186,7 @@ function scorePlayer(player, playerPreds, tournPred, fixtures, matchEvents, goal
         }
       }
     }
+
   }
 
   // Named player stats per match — only process mXXX documents to prevent double-counting
