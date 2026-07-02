@@ -52,6 +52,16 @@ function calcMatchPoints(fixture, pred, matchEvents, tournamentPred) {
   const breakdown = []
   let total = 0
 
+  // For knockout fixtures, only score if teams were real when prediction was saved
+  if (fixture.isKnockout) {
+    const isWindowPred = pred.knockoutWindowPrediction === true
+    const teamsAtSave = pred.homeTeamAtSave
+    const teamsMatchedWhenSaved = teamsAtSave && teamsAtSave !== 'TBD' && teamsAtSave === fixture.homeTeam
+    if (!isWindowPred && !teamsMatchedWhenSaved) {
+      return { total: 0, breakdown: ['Pre-tournament bracket prediction — not scored directly'] }
+    }
+  }
+
   const h90 = Number(pred.score90Home), a90 = Number(pred.score90Away)
   const actH90 = Number(fixture.score90Home), actA90 = Number(fixture.score90Away)
 
@@ -68,7 +78,9 @@ function calcMatchPoints(fixture, pred, matchEvents, tournamentPred) {
 
   if (fixture.hasExtraTime && pred.scoreETHome !== undefined && pred.scoreETHome !== '') {
     const hET = Number(pred.scoreETHome), aET = Number(pred.scoreETAway)
-    const actHET = Number(fixture.scoreAfterETHome), actAET = Number(fixture.scoreAfterETAway)
+    // Fall back to 90min score if API returns null ET scores (score unchanged in ET)
+    const actHET = fixture.scoreAfterETHome !== null ? Number(fixture.scoreAfterETHome) : Number(fixture.score90Home)
+    const actAET = fixture.scoreAfterETAway !== null ? Number(fixture.scoreAfterETAway) : Number(fixture.score90Away)
     if (!isNaN(hET) && !isNaN(aET) && !isNaN(actHET) && !isNaN(actAET)) {
       if (hET === actHET && aET === actAET) { total += 4; breakdown.push('✓ Correct ET score +4') }
       else if ((hET > aET ? 'h' : aET > hET ? 'a' : 'd') === (actHET > actAET ? 'h' : actAET > actHET ? 'a' : 'd')) {
@@ -372,8 +384,17 @@ export default function Fixtures({ playerId }) {
   }
 
   async function handleSave(fixtureId, data) {
-    await savePrediction(playerId, fixtureId, data)
-    setPredictions(prev => ({ ...prev, [fixtureId]: { ...prev[fixtureId], ...data, fixtureId } }))
+    const fixture = fixturesMap[fixtureId]
+    const enriched = {
+      ...data,
+      // Store team names at time of saving so scoring can verify matchup was known
+      homeTeamAtSave: fixture?.homeTeam || null,
+      awayTeamAtSave: fixture?.awayTeam || null,
+      // Flag if this was saved during a knockout window re-opening
+      knockoutWindowPrediction: !!(fixture?.isKnockout && deadlinePassed && knockoutWindows[fixture?.stage]),
+    }
+    await savePrediction(playerId, fixtureId, enriched)
+    setPredictions(prev => ({ ...prev, [fixtureId]: { ...prev[fixtureId], ...enriched, fixtureId } }))
   }
 
   const fixturesMap = {}
