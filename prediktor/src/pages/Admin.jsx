@@ -445,10 +445,12 @@ function BracketAudit({ addLog }) {
     // What it SHOULD be based on our mapping + actual R32 results
     const expectedHome = w1
     const expectedAway = w2
-    const mismatch = (w1 && w2) && (
-      (storedHome !== 'TBD' && storedHome !== expectedHome) ||
-      (storedAway !== 'TBD' && storedAway !== expectedAway)
+    // Flag if: winners known but stored is TBD, OR stored doesn't match expected
+    const needsUpdate = (w1 && w2) && (
+      storedHome === 'TBD' || storedAway === 'TBD' ||
+      storedHome !== expectedHome || storedAway !== expectedAway
     )
+    const mismatch = needsUpdate
     return { r16id, src1, src2, f1, f2, w1, w2, storedHome, storedAway, expectedHome, expectedAway, mismatch }
   })
 
@@ -479,8 +481,23 @@ function BracketAudit({ addLog }) {
             </div>
           ))}
 
-          <div style={{ fontSize: '0.78rem', color: 'var(--muted)', margin: '1rem 0 0.5rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Round of 16 Mapping Check
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '1rem 0 0.5rem' }}>
+            <div style={{ fontSize: '0.78rem', color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Round of 16 Mapping Check
+            </div>
+            {r16Rows.some(r => r.mismatch) && (
+              <button
+                className="btn btn-primary"
+                style={{ fontSize: '0.75rem', padding: '0.3rem 0.75rem' }}
+                onClick={async () => {
+                  for (const row of r16Rows.filter(r => r.mismatch && r.expectedHome && r.expectedAway)) {
+                    await fixR16Teams(row.r16id, row.expectedHome, row.expectedAway)
+                  }
+                }}
+              >
+                Fix All ({r16Rows.filter(r => r.mismatch).length})
+              </button>
+            )}
           </div>
           {r16Rows.map(row => (
             <div key={row.r16id} style={{
