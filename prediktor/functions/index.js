@@ -352,6 +352,85 @@ async function runSync(footballApiKey) {
     console.warn(`runSync: deleted ${numCount} stale numeric fixture documents`)
   }
 
+  // ── Auto-populate knockout bracket from completed results ─────────────────
+  // After each sync, compute winners of completed knockout fixtures and write
+  // them into the next round's slots automatically
+
+  const R32_TO_R16 = {
+    'm089': ['m074','m077'], 'm090': ['m073','m075'],
+    'm091': ['m076','m078'], 'm092': ['m079','m080'],
+    'm093': ['m083','m084'], 'm094': ['m081','m082'],
+    'm095': ['m086','m088'], 'm096': ['m085','m087'],
+  }
+  const R16_TO_QF = {
+    'm097': ['m089','m090'], 'm098': ['m093','m094'],
+    'm099': ['m091','m092'], 'm100': ['m095','m096'],
+  }
+  const QF_TO_SF = {
+    'm101': ['m097','m098'], 'm102': ['m099','m100'],
+  }
+  const SF_TO_FINAL = { 'm104': ['m101','m102'] }
+  const SF_TO_3RD =   { 'm103': ['m101','m102'] }
+
+  function getMatchWinner(f) {
+    if (!f?.completed) return null
+    if (f.hasPenalties) {
+      return Number(f.scorePenHome) > Number(f.scorePenAway) ? f.homeTeam : f.awayTeam
+    }
+    if (f.hasExtraTime) {
+      const h = f.scoreAfterETHome ?? f.score90Home
+      const a = f.scoreAfterETAway ?? f.score90Away
+      if (Number(h) !== Number(a)) return Number(h) > Number(a) ? f.homeTeam : f.awayTeam
+    }
+    if (Number(f.score90Home) > Number(f.score90Away)) return f.homeTeam
+    if (Number(f.score90Away) > Number(f.score90Home)) return f.awayTeam
+    return null
+  }
+
+  function getMatchLoser(f) {
+    const winner = getMatchWinner(f)
+    if (!winner || !f) return null
+    return winner === f.homeTeam ? f.awayTeam : f.homeTeam
+  }
+
+  // Re-read fixtures after batch commit to get latest data
+  const freshFixturesSnap = await db.collection('fixtures').get()
+  const freshFixtures = {}
+  freshFixturesSnap.docs.forEach(d => { freshFixtures[d.id] = { id: d.id, ...d.data() } })
+
+  const cascadeBatch = db.batch()
+  let cascadeCount = 0
+
+  const cascadeRounds = [
+    { mapping: R32_TO_R16, label: 'R32→R16', loserMap: null },
+    { mapping: R16_TO_QF, label: 'R16→QF', loserMap: null },
+    { mapping: QF_TO_SF,  label: 'QF→SF',  loserMap: null },
+    { mapping: SF_TO_FINAL, label: 'SF→Final', loserMap: null },
+    { mapping: SF_TO_3RD,  label: 'SF→3rd',  loserMap: 'loser' },
+  ]
+
+  for (const { mapping, label, loserMap } of cascadeRounds) {
+    for (const [targetId, [src1, src2]] of Object.entries(mapping)) {
+      const f1 = freshFixtures[src1], f2 = freshFixtures[src2]
+      const team1 = loserMap === 'loser' ? getMatchLoser(f1) : getMatchWinner(f1)
+      const team2 = loserMap === 'loser' ? getMatchLoser(f2) : getMatchWinner(f2)
+      if (!team1 || !team2) continue
+      const target = freshFixtures[targetId]
+      if (target?.homeTeam === team1 && target?.awayTeam === team2) continue // already correct
+      cascadeBatch.set(db.collection('fixtures').doc(targetId), {
+        homeTeam: team1,
+        awayTeam: team2,
+      }, { merge: true })
+      cascadeCount++
+      console.log(`runSync cascade ${label}: ${targetId} = ${team1} v ${team2}`)
+    }
+  }
+
+  if (cascadeCount > 0) {
+    await cascadeBatch.commit()
+    console.log(`runSync: cascaded ${cascadeCount} knockout bracket updates`)
+  }
+
   // Fetch events for recently completed fixtures
   const completedFixtures = fixtures.filter(f => f.completed && apiToOurId[f.id]).map(f => ({
     ...f,
