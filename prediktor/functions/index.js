@@ -417,12 +417,15 @@ async function runSync(footballApiKey) {
       if (!team1 || !team2) continue
       const target = freshFixtures[targetId]
       if (target?.homeTeam === team1 && target?.awayTeam === team2) continue // already correct
+      // Also look up apiFixtureId for this matchup from the API response
+      const apiId = Object.entries(apiToOurId).find(([, ourId]) => ourId === targetId)?.[0]
       cascadeBatch.set(db.collection('fixtures').doc(targetId), {
         homeTeam: team1,
         awayTeam: team2,
+        ...(apiId ? { apiFixtureId: apiId } : {}),
       }, { merge: true })
       cascadeCount++
-      console.log(`runSync cascade ${label}: ${targetId} = ${team1} v ${team2}`)
+      console.log(`runSync cascade ${label}: ${targetId} = ${team1} v ${team2}${apiId ? ` (API: ${apiId})` : ' (no API ID yet)'}`)
     }
   }
 
